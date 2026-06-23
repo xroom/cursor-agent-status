@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [{ "command": "./hooks/status-bridge.sh" }],
+    "sessionEnd": [{ "command": "./hooks/status-bridge.sh" }],
+    "preToolUse": [{ "command": "./hooks/status-bridge.sh" }],
+    "postToolUse": [{ "command": "./hooks/status-bridge.sh" }],
+    "postToolUseFailure": [{ "command": "./hooks/status-bridge.sh" }],
+    "subagentStart": [{ "command": "./hooks/status-bridge.sh" }],
+    "subagentStop": [{ "command": "./hooks/status-bridge.sh" }],
+    "beforeShellExecution": [{ "command": "./hooks/status-bridge.sh" }],
+    "afterShellExecution": [{ "command": "./hooks/status-bridge.sh" }],
+    "beforeMCPExecution": [{ "command": "./hooks/status-bridge.sh" }],
+    "afterMCPExecution": [{ "command": "./hooks/status-bridge.sh" }],
+    "stop": [{ "command": "./hooks/status-bridge.sh" }],
+    "afterAgentResponse": [{ "command": "./hooks/status-bridge.sh" }]
+  }
+}

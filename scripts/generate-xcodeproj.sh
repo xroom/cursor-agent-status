@@ -1,0 +1,306 @@
+#!/usr/bin/env bash
+# Generate Xcode project for CursorAgentStatus
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PROJ="${ROOT}/CursorAgentStatus.xcodeproj"
+PRODUCT="CursorAgentStatus"
+BUNDLE_ID="com.cursor.agentstatus"
+
+mkdir -p "${PROJ}"
+
+cat > "${PROJ}/project.pbxproj" <<'PBXPROJ'
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000000000000000000001 /* CursorAgentStatusApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* CursorAgentStatusApp.swift */; };
+		A10000000000000000000002 /* AgentEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* AgentEvent.swift */; };
+		A10000000000000000000003 /* TaskItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* TaskItem.swift */; };
+		A10000000000000000000004 /* AgentStatusSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* AgentStatusSnapshot.swift */; };
+		A10000000000000000000005 /* EventTailer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005 /* EventTailer.swift */; };
+		A10000000000000000000006 /* StatusStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* StatusStore.swift */; };
+		A10000000000000000000007 /* MenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* MenuBarView.swift */; };
+		A10000000000000000000008 /* FloatingPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* FloatingPanelView.swift */; };
+		A10000000000000000000009 /* TaskSectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009 /* TaskSectionView.swift */; };
+		A10000000000000000000010 /* StatusBadgeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000010 /* StatusBadgeView.swift */; };
+		A10000000000000000000011 /* FloatingPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* FloatingPanelController.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A20000000000000000000001 /* CursorAgentStatusApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorAgentStatusApp.swift; sourceTree = "<group>"; };
+		A20000000000000000000002 /* AgentEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentEvent.swift; sourceTree = "<group>"; };
+		A20000000000000000000003 /* TaskItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskItem.swift; sourceTree = "<group>"; };
+		A20000000000000000000004 /* AgentStatusSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentStatusSnapshot.swift; sourceTree = "<group>"; };
+		A20000000000000000000005 /* EventTailer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventTailer.swift; sourceTree = "<group>"; };
+		A20000000000000000000006 /* StatusStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusStore.swift; sourceTree = "<group>"; };
+		A20000000000000000000007 /* MenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarView.swift; sourceTree = "<group>"; };
+		A20000000000000000000008 /* FloatingPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingPanelView.swift; sourceTree = "<group>"; };
+		A20000000000000000000009 /* TaskSectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskSectionView.swift; sourceTree = "<group>"; };
+		A20000000000000000000010 /* StatusBadgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBadgeView.swift; sourceTree = "<group>"; };
+		A20000000000000000000011 /* FloatingPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingPanelController.swift; sourceTree = "<group>"; };
+		A20000000000000000000020 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A20000000000000000000030 /* CursorAgentStatus.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CursorAgentStatus.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A30000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A40000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				A40000000000000000000002 /* CursorAgentStatus */,
+				A40000000000000000000003 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A40000000000000000000002 /* CursorAgentStatus */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000001 /* CursorAgentStatusApp.swift */,
+				A40000000000000000000004 /* Models */,
+				A40000000000000000000005 /* Services */,
+				A40000000000000000000006 /* Views */,
+				A40000000000000000000007 /* Controllers */,
+				A20000000000000000000020 /* Info.plist */,
+			);
+			path = CursorAgentStatus;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000030 /* CursorAgentStatus.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000004 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000002 /* AgentEvent.swift */,
+				A20000000000000000000003 /* TaskItem.swift */,
+				A20000000000000000000004 /* AgentStatusSnapshot.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000005 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000005 /* EventTailer.swift */,
+				A20000000000000000000006 /* StatusStore.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000006 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000007 /* MenuBarView.swift */,
+				A20000000000000000000008 /* FloatingPanelView.swift */,
+				A20000000000000000000009 /* TaskSectionView.swift */,
+				A20000000000000000000010 /* StatusBadgeView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000007 /* Controllers */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000011 /* FloatingPanelController.swift */,
+			);
+			path = Controllers;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A50000000000000000000001 /* CursorAgentStatus */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A70000000000000000000003 /* Build configuration list for PBXNativeTarget "CursorAgentStatus" */;
+			buildPhases = (
+				A60000000000000000000001 /* Sources */,
+				A30000000000000000000001 /* Frameworks */,
+				A60000000000000000000002 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = CursorAgentStatus;
+			productName = CursorAgentStatus;
+			productReference = A20000000000000000000030 /* CursorAgentStatus.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A80000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+			};
+			buildConfigurationList = A70000000000000000000001 /* Build configuration list for PBXProject "CursorAgentStatus" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A40000000000000000000001;
+			productRefGroup = A40000000000000000000003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A50000000000000000000001 /* CursorAgentStatus */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A60000000000000000000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A60000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000001 /* CursorAgentStatusApp.swift in Sources */,
+				A10000000000000000000002 /* AgentEvent.swift in Sources */,
+				A10000000000000000000003 /* TaskItem.swift in Sources */,
+				A10000000000000000000004 /* AgentStatusSnapshot.swift in Sources */,
+				A10000000000000000000005 /* EventTailer.swift in Sources */,
+				A10000000000000000000006 /* StatusStore.swift in Sources */,
+				A10000000000000000000007 /* MenuBarView.swift in Sources */,
+				A10000000000000000000008 /* FloatingPanelView.swift in Sources */,
+				A10000000000000000000009 /* TaskSectionView.swift in Sources */,
+				A10000000000000000000010 /* StatusBadgeView.swift in Sources */,
+				A10000000000000000000011 /* FloatingPanelController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A90000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		A90000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		A90000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = CursorAgentStatus/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.cursor.agentstatus;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		A90000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = CursorAgentStatus/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.cursor.agentstatus;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A70000000000000000000001 /* Build configuration list for PBXProject "CursorAgentStatus" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A90000000000000000000001 /* Debug */,
+				A90000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A70000000000000000000003 /* Build configuration list for PBXNativeTarget "CursorAgentStatus" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A90000000000000000000003 /* Debug */,
+				A90000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = A80000000000000000000001 /* Project object */;
+}
+PBXPROJ
+
+echo "Generated ${PROJ}/project.pbxproj"
