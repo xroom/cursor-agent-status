@@ -6,94 +6,98 @@ struct MenuBarView: View {
     @Binding var isFloatingPanelVisible: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             header
+            ProMetricsRow(
+                running: store.activeCount,
+                pending: store.pendingCount,
+                recent: store.recentCount
+            )
 
-            HStack(spacing: 8) {
-                statChip(title: "进行中", count: store.activeCount, color: .blue)
-                statChip(title: "待确认", count: store.pendingCount, color: .orange)
-                statChip(title: "刚完成", count: store.recentCount, color: .green)
-            }
+            summaryLine
 
             Divider()
 
             TaskSectionView(
-                title: "进行中",
+                title: "RUN · 进行中",
                 count: store.activeCount,
                 items: store.running,
-                accent: .blue,
+                code: .run,
                 limit: 5,
                 onSelect: { store.openTranscript(for: $0) }
             )
 
             TaskSectionView(
-                title: "待确认",
+                title: "PND · 待确认",
                 count: store.pendingCount,
                 items: store.pending,
-                accent: .orange,
+                code: .pnd,
                 limit: 5,
                 onSelect: { store.openTranscript(for: $0) }
             )
 
             TaskSectionView(
-                title: "刚完成",
+                title: "DONE · 刚完成",
                 count: store.recentCount,
                 items: store.recent,
-                accent: .green,
+                code: .done,
                 limit: 5,
                 onSelect: { store.openTranscript(for: $0) }
             )
 
-            Text("Smart Mode 内置审批不一定能被 Hook 捕获")
-                .font(.caption2)
+            Text("Hook 无法捕获 Smart Mode 内置审批")
+                .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(.tertiary)
 
             Divider()
 
-            HStack {
-                Button("打开 Cursor") { store.openCursor() }
-                Button(isFloatingPanelVisible ? "隐藏悬浮窗" : "显示悬浮窗") {
+            HStack(spacing: 12) {
+                Button("Cursor") { store.openCursor() }
+                Button(isFloatingPanelVisible ? "隐藏窗" : "悬浮窗") {
                     isFloatingPanelVisible.toggle()
                 }
-                Button("重置状态") { store.resetActiveState() }
+                Button("重置") { store.resetActiveState() }
                 Spacer()
                 Button("退出") { NSApplication.shared.terminate(nil) }
             }
+            .font(.system(size: 12))
         }
-        .padding(14)
-        .frame(width: 360)
+        .padding(12)
+        .frame(width: 340)
     }
 
     private var header: some View {
         HStack {
-            Image(systemName: store.statusIconName)
-                .font(.title3)
-                .foregroundStyle(store.pendingCount > 0 ? .orange : (store.activeCount > 0 ? .blue : .secondary))
             VStack(alignment: .leading, spacing: 2) {
-                Text("Cursor Agent 状态")
-                    .font(.headline)
-                Text(store.activeCount > 0 ? "AI 正在工作" : "当前空闲")
-                    .font(.caption)
+                Text("AGENT STATUS")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
                     .foregroundStyle(.secondary)
+                Text(headerSubtitle)
+                    .font(.system(size: 14, weight: .semibold))
             }
             Spacer()
+            ProStatusTag(code: ProStatusCode(trafficLight: store.trafficLightState))
         }
     }
 
-    private func statChip(title: String, count: Int, color: Color) -> some View {
-        VStack(spacing: 4) {
-            Text("\(count)")
-                .font(.title3.weight(.bold))
-                .foregroundStyle(color)
-            Text(title)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(color.opacity(0.08))
-        )
+    private var headerSubtitle: String {
+        if store.pendingCount > 0 { return "Pending \(store.pendingCount)" }
+        if store.activeCount > 0 { return "Running \(store.activeCount)" }
+        if store.recentCount > 0 { return "Recently done \(store.recentCount)" }
+        return "Idle"
+    }
+
+    private var summaryLine: some View {
+        Text(store.proSummaryLine)
+            .font(.system(size: 12))
+            .foregroundStyle(.primary)
+            .lineLimit(2)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(Color.primary.opacity(0.03))
+            )
     }
 }

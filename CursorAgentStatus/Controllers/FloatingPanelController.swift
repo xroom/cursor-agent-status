@@ -4,80 +4,71 @@ import SwiftUI
 @MainActor
 final class FloatingPanelController: NSObject {
     private var panel: NSPanel?
-    private var hostingView: NSHostingView<FloatingPanelRootView>?
+    private var hostingView: NSHostingView<FloatingPanelView>?
+    private var lastContentSize = NSSize.zero
+    private var hasPlacedInitially = false
+
+    /// 悬浮窗底边与 Dock 可见区域顶部的间距
+    private let dockTopMargin: CGFloat = 12
 
     var isVisible: Bool { panel?.isVisible == true }
 
-    func show(
-        store: StatusStore,
-        isAlwaysOnTop: Binding<Bool>,
-        opacity: Binding<Double>,
-        autoHideWhenIdle: Binding<Bool>
-    ) {
+    func show(store: StatusStore) {
         if panel == nil {
             let panel = NSPanel(
-                contentRect: NSRect(x: 0, y: 0, width: 420, height: 560),
-                styleMask: [.nonactivatingPanel, .titled, .closable, .fullSizeContentView],
+                contentRect: NSRect(x: 0, y: 0, width: 300, height: 44),
+                styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
             )
-            panel.title = "Cursor Agent Status"
-            panel.titlebarAppearsTransparent = true
-            panel.isMovableByWindowBackground = true
+            panel.isOpaque = false
+            panel.backgroundColor = .clear
+            panel.hasShadow = false
             panel.level = .floating
-            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+            panel.isMovableByWindowBackground = true
             panel.isReleasedWhenClosed = false
-            panel.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.95)
-            panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
-            panel.standardWindowButton(.zoomButton)?.isHidden = true
+            panel.hidesOnDeactivate = false
             self.panel = panel
         }
 
-        let root = FloatingPanelRootView(
-            store: store,
-            isAlwaysOnTop: isAlwaysOnTop,
-            opacity: opacity,
-            autoHideWhenIdle: autoHideWhenIdle,
-            onClose: { [weak self] in self?.hide() }
-        )
-
         if hostingView == nil {
-            hostingView = NSHostingView(rootView: root)
-            panel?.contentView = hostingView
+            let hosting = NSHostingView(rootView: FloatingPanelView(store: store))
+            hosting.translatesAutoresizingMaskIntoConstraints = false
+            hosting.wantsLayer = true
+            hosting.layer?.backgroundColor = NSColor.clear.cgColor
+            panel?.contentView = hosting
+            hostingView = hosting
         } else {
-            hostingView?.rootView = root
+            hostingView?.rootView = FloatingPanelView(store: store)
         }
 
-        applyWindowSettings(isAlwaysOnTop: isAlwaysOnTop.wrappedValue, opacity: opacity.wrappedValue)
-        panel?.center()
-        panel?.makeKeyAndOrderFront(nil)
+        if !hasPlacedInitially {
+            resizeToFitContent(preserveCenter: false)
+            positionAboveDockCentered()
+            hasPlacedInitially = true
+        } else {
+            resizeToFitContent(preserveCenter: true)
+        }
+        panel?.orderFrontRegardless()
     }
 
     func hide() {
         panel?.orderOut(nil)
     }
 
-    func toggle(
-        store: StatusStore,
-        isAlwaysOnTop: Binding<Bool>,
-        opacity: Binding<Double>,
-        autoHideWhenIdle: Binding<Bool>
-    ) {
+    func toggle(store: StatusStore) {
         if isVisible {
             hide()
         } else {
-            show(
-                store: store,
-                isAlwaysOnTop: isAlwaysOnTop,
-                opacity: opacity,
-                autoHideWhenIdle: autoHideWhenIdle
-            )
+            show(store: store)
         }
     }
 
-    func applyWindowSettings(isAlwaysOnTop: Bool, opacity: Double) {
-        panel?.level = isAlwaysOnTop ? .floating : .normal
-        panel?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(opacity)
+    func refreshLayout(store: StatusStore) {
+        guard isVisible else { return }
+        // @Observable 会自动刷新视图；内容尺寸变化时以当前位置为中心缩放
+        resizeToFitContent(preserveCenter: true)
     }
 
     func updateAutoHide(store: StatusStore, autoHideWhenIdle: Bool) {
@@ -86,40 +77,53 @@ final class FloatingPanelController: NSObject {
             hide()
         }
     }
-}
 
-private struct FloatingPanelRootView: View {
-    @Bindable var store: StatusStore
-    @Binding var isAlwaysOnTop: Bool
-    @Binding var opacity: Double
-    @Binding var autoHideWhenIdle: Bool
-    var onClose: () -> Void
+    private func resizeToFitContent(preserveCenter: Bool) {
+        guard let hostingView, let panel else { return }
+        hostingView.layoutSubtreeIfNeeded()
 
-    var body: some View {
-        FloatingPanelView(
-            store: store,
-            isAlwaysOnTop: $isAlwaysOnTop,
-            opacity: $opacity,
-            autoHideWhenIdle: $autoHideWhenIdle,
-            onClose: onClose
+        let fitted = hostingView.fittingSize
+        let clampedWidth = min(
+            max(fitted.width, FloatingPanelLayout.minWidth),
+            FloatingPanelLayout.maxWidth
         )
-        .onChange(of: isAlwaysOnTop) { _, value in
-            NotificationCenter.default.post(
-                name: .floatingPanelSettingsChanged,
-                object: nil,
-                userInfo: ["alwaysOnTop": value, "opacity": opacity]
-            )
-        }
-        .onChange(of: opacity) { _, value in
-            NotificationCenter.default.post(
-                name: .floatingPanelSettingsChanged,
-                object: nil,
-                userInfo: ["alwaysOnTop": isAlwaysOnTop, "opacity": value]
-            )
-        }
-    }
-}
+        let newSize = NSSize(
+            width: clampedWidth,
+            height: max(fitted.height, 36)
+        )
 
-extension Notification.Name {
-    static let floatingPanelSettingsChanged = Notification.Name("floatingPanelSettingsChanged")
+        // 尺寸没变就不动窗口，避免每秒重复 setFrame 导致抖动
+        if abs(newSize.width - lastContentSize.width) < 0.5,
+           abs(newSize.height - lastContentSize.height) < 0.5 {
+            return
+        }
+        lastContentSize = newSize
+
+        let oldFrame = panel.frame
+        var newFrame = NSRect(origin: oldFrame.origin, size: newSize)
+
+        if preserveCenter {
+            let centerX = oldFrame.midX
+            let centerY = oldFrame.midY
+            newFrame.origin.x = centerX - newSize.width / 2
+            newFrame.origin.y = centerY - newSize.height / 2
+        }
+
+        panel.setFrame(newFrame, display: true)
+    }
+
+    /// 水平居中，紧贴 Dock 可见区域上方（`visibleFrame` 已排除 Dock 与菜单栏）
+    private func positionAboveDockCentered() {
+        guard let panel else { return }
+
+        let screen = panel.screen ?? NSScreen.main ?? NSScreen.screens.first
+        guard let screen else { return }
+
+        let visible = screen.visibleFrame
+        let size = panel.frame.size
+
+        let x = visible.midX - size.width / 2
+        let y = visible.minY + dockTopMargin
+        panel.setFrameOrigin(NSPoint(x: x, y: y))
+    }
 }

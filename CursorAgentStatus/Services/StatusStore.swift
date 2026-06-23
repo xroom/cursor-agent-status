@@ -14,6 +14,8 @@ final class StatusStore {
     private(set) var pending: [TaskItem] = []
     private(set) var recent: [TaskItem] = []
 
+    private(set) var revision = 0
+
     var recentTTL: TimeInterval = 60
     var awaitingInputDelay: TimeInterval = 3
     /// 工具/subagent 超过此时间无更新则视为已结束（Cursor 异常退出时不会发 postToolUse）
@@ -229,41 +231,15 @@ final class StatusStore {
             }
 
         case "beforeShellExecution":
-            let key = "shell-\(conversationId)-\(event.command ?? event.title ?? UUID().uuidString)"
-            let item = TaskItem(
-                id: key,
-                category: .pending,
-                kind: .shell,
-                title: event.command ?? event.title ?? "Shell 命令",
-                subtitle: "等待执行批准",
-                conversationId: event.conversationId,
-                workspace: event.workspace,
-                transcriptPath: event.transcriptPath,
-                startedAt: now,
-                updatedAt: now,
-                expiresAt: nil
-            )
-            pendingShellMCP[key] = item
+            // 不在触发时标记待确认；Hook 返回 allow 时命令会自动执行，不应闪现在待确认
+            break
 
         case "afterShellExecution":
             clearPendingShell(for: conversationId, prefix: "shell-")
 
         case "beforeMCPExecution":
-            let key = "mcp-\(conversationId)-\(event.toolName ?? event.title ?? UUID().uuidString)"
-            let item = TaskItem(
-                id: key,
-                category: .pending,
-                kind: .mcp,
-                title: event.toolName ?? event.title ?? "MCP 工具",
-                subtitle: "等待执行批准",
-                conversationId: event.conversationId,
-                workspace: event.workspace,
-                transcriptPath: event.transcriptPath,
-                startedAt: now,
-                updatedAt: now,
-                expiresAt: nil
-            )
-            pendingShellMCP[key] = item
+            // 不在触发时标记待确认；自动执行的 MCP 不应出现在待确认列表
+            break
 
         case "afterMCPExecution":
             clearPendingShell(for: conversationId, prefix: "mcp-")
@@ -325,14 +301,21 @@ final class StatusStore {
         pruneStaleRunning(now: Date())
         promoteAwaitingInput()
 
-        running = (Array(sessions.values) + Array(tools.values) + Array(subagents.values))
+        let newRunning = (Array(sessions.values) + Array(tools.values) + Array(subagents.values))
+            .sorted { $0.updatedAt > $1.updatedAt }
+        let newPending = Array(pendingShellMCP.values)
+            .sorted { $0.updatedAt > $1.updatedAt }
+        let newRecent = recent
             .sorted { $0.updatedAt > $1.updatedAt }
 
-        pending = Array(pendingShellMCP.values)
-            .sorted { $0.updatedAt > $1.updatedAt }
+        let changed = newRunning != running || newPending != pending || newRecent != recent
+        running = newRunning
+        pending = newPending
+        recent = newRecent
 
-        recent = recent
-            .sorted { $0.updatedAt > $1.updatedAt }
+        if changed {
+            revision += 1
+        }
     }
 
     private func promoteAwaitingInput() {

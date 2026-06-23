@@ -9,6 +9,14 @@ from pathlib import Path
 
 
 def pick_title(data: dict) -> str | None:
+    tool_name = data.get("tool_name")
+    tool_input = data.get("tool_input")
+    if isinstance(tool_input, dict):
+        for key in ("path", "file_path", "target_file"):
+            value = tool_input.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+
     for key in ("prompt", "task", "description", "command", "text", "agent_message", "tool_name"):
         value = data.get(key)
         if isinstance(value, str) and value.strip():
