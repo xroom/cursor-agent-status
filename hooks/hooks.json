@@ -3,6 +3,8 @@
   "hooks": {
     "sessionStart": [{ "command": "./hooks/status-bridge.sh" }],
     "sessionEnd": [{ "command": "./hooks/status-bridge.sh" }],
+    "beforeSubmitPrompt": [{ "command": "./hooks/status-bridge.sh" }],
+    "afterAgentThought": [{ "command": "./hooks/status-bridge.sh" }],
     "preToolUse": [{ "command": "./hooks/status-bridge.sh" }],
     "postToolUse": [{ "command": "./hooks/status-bridge.sh" }],
     "postToolUseFailure": [{ "command": "./hooks/status-bridge.sh" }],

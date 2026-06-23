@@ -84,6 +84,41 @@ final class StatusStore {
         lastActivityAt[conversationId] = now
 
         switch event.event {
+        case "beforeSubmitPrompt":
+            let promptPreview = event.title ?? "正在处理指令"
+            let item = TaskItem(
+                id: "processing-\(conversationId)",
+                category: .running,
+                kind: .processing,
+                title: "处理中: \(truncated(promptPreview, limit: 60))",
+                subtitle: "已收到你的消息",
+                conversationId: event.conversationId,
+                workspace: event.workspace,
+                transcriptPath: event.transcriptPath,
+                startedAt: now,
+                updatedAt: now,
+                expiresAt: nil
+            )
+            sessions[conversationId] = item
+            lastResponseAt.removeValue(forKey: conversationId)
+            removeAwaitingInput(for: conversationId)
+
+        case "afterAgentThought":
+            let item = TaskItem(
+                id: "thinking-\(conversationId)",
+                category: .running,
+                kind: .thinking,
+                title: "思考中…",
+                subtitle: truncated(event.title ?? "", limit: 40).isEmpty ? nil : truncated(event.title ?? "", limit: 40),
+                conversationId: event.conversationId,
+                workspace: event.workspace,
+                transcriptPath: event.transcriptPath,
+                startedAt: now,
+                updatedAt: now,
+                expiresAt: nil
+            )
+            sessions[conversationId] = item
+
         case "sessionStart":
             let item = TaskItem(
                 id: "session-\(conversationId)",
@@ -113,6 +148,7 @@ final class StatusStore {
             subagents = subagents.filter { $0.value.conversationId != conversationId }
 
         case "preToolUse":
+            sessions.removeValue(forKey: conversationId) // 清除「处理中/思考中」占位
             guard let toolUseId = event.toolUseId else { break }
             let item = TaskItem(
                 id: "tool-\(toolUseId)",

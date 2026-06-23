@@ -2,13 +2,14 @@
 """Normalize Cursor hook events and append to agent-status event log."""
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
 
 
 def pick_title(data: dict) -> str | None:
-    for key in ("task", "description", "command", "text", "agent_message", "tool_name"):
+    for key in ("prompt", "task", "description", "command", "text", "agent_message", "tool_name"):
         value = data.get(key)
         if isinstance(value, str) and value.strip():
             text = value.strip()
@@ -24,9 +25,16 @@ def pick_title(data: dict) -> str | None:
     return None
 
 
+def append_event(events_file: Path, line: str) -> None:
+    events_file.parent.mkdir(parents=True, exist_ok=True)
+    with events_file.open("a", encoding="utf-8") as handle:
+        handle.write(line + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
 def main() -> int:
     events_file = Path(sys.argv[1])
-    snapshot_file = Path(sys.argv[2])
     raw_input = sys.stdin.read()
 
     try:
@@ -61,30 +69,8 @@ def main() -> int:
         "summary": payload.get("summary"),
     }
 
-    events_file.parent.mkdir(parents=True, exist_ok=True)
     line = json.dumps(normalized, ensure_ascii=False, separators=(",", ":"))
-    with events_file.open("a", encoding="utf-8") as handle:
-        handle.write(line + "\n")
-
-    snapshot = {
-        "updated_at": normalized["ts"],
-        "last_event": event_name,
-        "running": [],
-        "pending": [],
-        "recent": [],
-    }
-    try:
-        if snapshot_file.exists():
-            existing = json.loads(snapshot_file.read_text(encoding="utf-8"))
-            for key in ("running", "pending", "recent"):
-                if isinstance(existing.get(key), list):
-                    snapshot[key] = existing[key]
-    except Exception:
-        pass
-
-    snapshot["updated_at"] = normalized["ts"]
-    snapshot["last_event"] = event_name
-    snapshot_file.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
+    append_event(events_file, line)
 
     if event_name in ("beforeShellExecution", "beforeMCPExecution"):
         print(json.dumps({"permission": "allow"}))

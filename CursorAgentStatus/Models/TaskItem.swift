@@ -8,12 +8,14 @@ enum TaskCategory: String, Codable, Sendable {
 
 enum TaskKind: String, Codable, Sendable {
     case session
+    case processing
     case tool
     case subagent
     case shell
     case mcp
     case response
     case stop
+    case thinking
 }
 
 struct TaskItem: Identifiable, Codable, Sendable, Hashable {
