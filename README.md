@@ -22,10 +22,11 @@ macOS 菜单栏应用，通过 [Cursor Hooks](https://cursor.com/docs/agent/hook
 
 ![悬浮 HUD](assets/悬浮窗.png)
 
-- 两行展示：**正在做什么** + **当前项目名**
-- 多个任务并行时自动轮换（每 3 秒切换）
+- 每个活跃 Agent **独立一个悬浮窗**（多会话并排显示）
+- 第一行：**Agent 名称**（与 Cursor 侧边栏聊天标题一致）
+- 第二行：**当前状态** + **步骤耗时**（如 `12秒`）
 - 有进行中任务时显示停止按钮（发送 ⌘⇧⌫ 到 Cursor）
-- 默认 Dock 上方居中，可拖动
+- 默认 Dock 上方水平居中，可拖动
 
 ---
 
@@ -35,8 +36,8 @@ macOS 菜单栏应用，通过 [Cursor Hooks](https://cursor.com/docs/agent/hook
 |------|------|
 | **菜单栏图标** | SF Symbol 状态图标 + 进行中任务红色角标 |
 | **下拉面板** | RUN / PND / DONE 指标、状态摘要、分区任务列表 |
-| **悬浮 HUD** | 两行状态条：任务描述 + 项目名，Dock 上方居中 |
-| **Hooks 桥接** | 13+ 事件写入本地日志，Mac 应用实时监听 |
+| **悬浮 HUD** | 按 Agent 分窗；名称 + 思考/探索/工具状态 + 计时 |
+| **Hooks 桥接** | 15 种事件写入本地日志，Mac 应用实时监听 |
 | **自动清理** | 过期任务自动淡出，支持手动重置残留状态 |
 
 ### 三种任务状态
@@ -45,7 +46,7 @@ macOS 菜单栏应用，通过 [Cursor Hooks](https://cursor.com/docs/agent/hook
 |------|------|------|
 | 进行中 | `RUN` | Agent 会话、工具调用、Subagent、思考/处理中 |
 | 待确认 | `PND` | Agent 回复后等待输入；Shell/MCP 批准流程相关 |
-| 刚完成 | `DONE` | 最近 60 秒内结束的任务，超时自动消失 |
+| 刚完成 | `DONE` | 最近 60 秒内结束的任务（显示 Hook `summary`） |
 
 ### 菜单栏图标
 
@@ -57,11 +58,15 @@ macOS 菜单栏应用，通过 [Cursor Hooks](https://cursor.com/docs/agent/hook
 
 ### 悬浮窗（HUD）
 
-- 两行：`[状态标签]  正在做什么` / `项目名 · 1/2`
-- 显示用户指令或子任务描述，**不暴露 Shell 命令**
-- 多个进行中任务时 **3 秒轮换**
-- 默认出现在 **Dock 上方、屏幕水平居中**；内容变化时固定左上角，仅调整尺寸
-- 宽度 **200px ~ 400px**；可拖动；可通过面板开关关闭
+| 项目 | 说明 |
+|------|------|
+| **多 Agent** | 每个进行中的会话各一个窗口，Dock 上方水平并排 |
+| **第一行** | Agent 名称，来自 Cursor `composer.composerHeaders` |
+| **第二行** | 思考摘要 / `Exploring · …` / 工具状态，末尾显示步骤耗时 |
+| **思考内容** | 来自 Hook `afterAgentThought`，工具执行期间仍保留显示 |
+| **完成态** | 仅显示 Hook `summary`，不显示「Agent 任务完成」等固定文案 |
+| **布局** | 宽度 200–400px；`RUN/PND/DONE` 标签固定宽度不被压缩 |
+| **停止** | 进行中时显示红色 ■，向 Cursor 发送 ⌘⇧⌫ |
 
 ### 下拉面板
 
@@ -122,6 +127,8 @@ xcodebuild -project CursorAgentStatus.xcodeproj \
 
 构建完成后打开 DerivedData 中的 `CursorAgentStatus.app`，或拖入「应用程序」文件夹。
 
+> **更新代码后**请重新执行 `./scripts/install-hooks.sh` 并重启 App，否则悬浮窗可能仍是旧行为。
+
 ### 3. 验证安装
 
 ```bash
@@ -134,7 +141,11 @@ xcodebuild -project CursorAgentStatus.xcodeproj \
 tail -f ~/.cursor/agent-status/events.jsonl
 ```
 
-有新行写入即表示 Hooks 工作正常。
+有新行写入即表示 Hooks 工作正常。验证思考内容是否捕获：
+
+```bash
+tail -f ~/.cursor/agent-status/events.jsonl | grep afterAgentThought
+```
 
 ---
 
@@ -156,7 +167,8 @@ Cursor Agent 事件
 CursorAgentStatus.app              ← FSEvents + 200ms 轮询
        │
        ├── 菜单栏图标 + 下拉面板
-       └── 悬浮 HUD
+       └── 悬浮 HUD（按 conversationId 多窗）
+              └── ComposerNameResolver ← 读取 Cursor 聊天标题
 ```
 
 ### 监听的 Hook 事件
@@ -164,13 +176,13 @@ CursorAgentStatus.app              ← FSEvents + 200ms 轮询
 | 事件 | 用途 |
 |------|------|
 | `beforeSubmitPrompt` | 用户发送指令，立即显示「处理中」 |
-| `afterAgentThought` | Agent 思考中 |
+| `afterAgentThought` | Agent 思考摘要（悬浮窗第二行优先展示） |
 | `sessionStart` / `sessionEnd` | 会话生命周期 |
 | `preToolUse` / `postToolUse` / `postToolUseFailure` | 工具调用 |
-| `subagentStart` / `subagentStop` | 子代理 |
+| `subagentStart` / `subagentStop` | 子代理（Explore 显示为 `Exploring`） |
 | `beforeShellExecution` / `afterShellExecution` | Shell 执行 |
 | `beforeMCPExecution` / `afterMCPExecution` | MCP 执行 |
-| `stop` | Agent 循环结束 |
+| `stop` | Agent 循环结束（写入 summary） |
 | `afterAgentResponse` | Agent 回复完成 |
 
 ### 自动过期（防止残留「假进行中」）
@@ -191,9 +203,9 @@ cursor-agent-status/
 ├── assets/                     # 截图等资源
 ├── CursorAgentStatus/          # SwiftUI macOS 应用
 │   ├── CursorAgentStatusApp.swift
-│   ├── Controllers/            # 悬浮窗控制
+│   ├── Controllers/            # 多悬浮窗控制（FloatingPanelController）
 │   ├── Models/                 # 事件与任务模型
-│   ├── Services/               # StatusStore、EventTailer
+│   ├── Services/               # StatusStore、EventTailer、ComposerNameResolver
 │   └── Views/                  # 菜单栏、悬浮窗、主题组件
 ├── hooks/
 │   ├── hooks.json              # Hook 配置模板
@@ -214,7 +226,8 @@ cursor-agent-status/
 - **仅覆盖本地 IDE Agent** — Cloud Agent（cursor.com/agents）运行在远程 VM，不会触发用户级 `~/.cursor/hooks.json`
 - **Smart Mode 内置审批** — Cursor 内置审批 UI 不一定经过 Hook，部分待确认状态可能无法捕获
 - **深链跳转** — 点击任务会尝试打开 transcript 文件，尚不支持直接跳转到 Cursor 对应对话
-- **停止按钮** — 通过模拟 ⌘⇧⌫ 取消生成，已运行的终端进程可能不会立即停止
+- **停止按钮** — 通过模拟 ⌘⇧⌫ 取消当前前台 Cursor 生成，已运行的终端进程可能不会立即停止
+- **Agent 名称** — 依赖 Cursor 本地状态库 `state.vscdb`，Cursor 大版本升级后路径或字段可能变化
 
 ---
 
@@ -230,6 +243,16 @@ cursor-agent-status/
 2. 重启 Cursor
 3. 观察 `~/.cursor/agent-status/events.jsonl` 是否有新事件
 4. 重启 CursorAgentStatus 应用
+
+**悬浮窗没有显示思考内容？**
+
+1. 确认 Hook 有写入：`grep afterAgentThought ~/.cursor/agent-status/events.jsonl | tail -1`
+2. 重新安装 Hooks：`./scripts/install-hooks.sh` 并重启 Cursor
+3. 重新编译并启动 App（旧版会显示文件名而非思考摘要）
+
+**多个 Agent 只看到一个悬浮窗？**
+
+确认已运行最新编译的 App；每个 UUID 格式的 `conversationId` 对应独立窗口，测试/demo 会话会被过滤。
 
 **重启 Cursor 后仍有大量「进行中」？**
 
@@ -250,11 +273,12 @@ xcodebuild -project CursorAgentStatus.xcodeproj \
   -configuration Debug \
   build
 
-# 更新 Hooks 后重新安装
+# 更新 Hooks 与 App 后
 ./scripts/install-hooks.sh
+pkill -x CursorAgentStatus; open DerivedData/.../CursorAgentStatus.app
 ```
 
-主要技术栈：SwiftUI · `@Observable` · FSEvents · Python 3 · Cursor Hooks
+主要技术栈：SwiftUI · `@Observable` · FSEvents · SQLite3 · Python 3 · Cursor Hooks
 
 ---
 
@@ -266,7 +290,7 @@ xcodebuild -project CursorAgentStatus.xcodeproj \
 | `~/.cursor/hooks/status-bridge.sh` | Hook 入口 |
 | `~/.cursor/hooks/status-bridge.py` | 事件归一化 |
 | `~/.cursor/agent-status/events.jsonl` | 事件日志 |
-| `~/.cursor/agent-status/state.json` | 状态快照 |
+| `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` | Cursor 聊天标题（Agent 名） |
 
 ---
 

@@ -35,6 +35,8 @@ final class StatusStore {
     private var conversationHeadlines: [String: String] = [:]
     /// 每个会话的 Agent 显示名称
     private var agentNames: [String: String] = [:]
+    /// 最近一次 Agent 思考摘要（afterAgentThought）
+    private var conversationThoughts: [String: String] = [:]
     private var pruneTimer: Timer?
 
     var activeCount: Int {
@@ -83,6 +85,7 @@ final class StatusStore {
         lastActivityAt.removeAll()
         conversationHeadlines.removeAll()
         agentNames.removeAll()
+        conversationThoughts.removeAll()
         refreshPublishedLists()
     }
 
@@ -116,12 +119,15 @@ final class StatusStore {
             removeAwaitingInput(for: conversationId)
 
         case "afterAgentThought":
+            if let thought = normalizedThoughtText(event.title) {
+                conversationThoughts[conversationId] = thought
+            }
             let item = TaskItem(
                 id: "thinking-\(conversationId)",
                 category: .running,
                 kind: .thinking,
                 title: "思考中…",
-                subtitle: truncated(event.title ?? "", limit: 40).isEmpty ? nil : truncated(event.title ?? "", limit: 40),
+                subtitle: conversationThoughts[conversationId],
                 conversationId: event.conversationId,
                 workspace: event.workspace,
                 transcriptPath: event.transcriptPath,
@@ -152,6 +158,7 @@ final class StatusStore {
         case "sessionEnd":
             conversationHeadlines.removeValue(forKey: conversationId)
             agentNames.removeValue(forKey: conversationId)
+            conversationThoughts.removeValue(forKey: conversationId)
             if let session = sessions.removeValue(forKey: conversationId) {
                 if event.status == "completed" || event.status == nil {
                     addRecent(
@@ -299,6 +306,7 @@ final class StatusStore {
                 sessions.removeValue(forKey: conversationId)
                 conversationHeadlines.removeValue(forKey: conversationId)
                 agentNames.removeValue(forKey: conversationId)
+                conversationThoughts.removeValue(forKey: conversationId)
             }
             if event.status == "completed" {
                 addRecent(
@@ -532,6 +540,18 @@ final class StatusStore {
     func sessionHeadline(for conversationId: String?) -> String? {
         guard let conversationId else { return nil }
         return conversationHeadlines[conversationId]
+    }
+
+    func sessionThought(for conversationId: String?) -> String? {
+        guard let conversationId else { return nil }
+        return conversationThoughts[conversationId]
+    }
+
+    private func normalizedThoughtText(_ text: String?) -> String? {
+        guard let text else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return truncated(trimmed, limit: 120)
     }
 
     func agentDisplayName(for conversationId: String) -> String {

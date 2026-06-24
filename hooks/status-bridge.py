@@ -12,6 +12,14 @@ def pick_title(data: dict) -> str | None:
     event_name = data.get("hook_event_name") or data.get("event") or ""
     tool_name = data.get("tool_name")
 
+    # Agent 思考：优先完整思考文本
+    if event_name == "afterAgentThought":
+        for key in ("text", "thought", "agent_message", "message", "title", "prompt"):
+            value = data.get(key)
+            if isinstance(value, str) and value.strip():
+                text = value.strip()
+                return text[:120] + ("…" if len(text) > 120 else "")
+
     # 子代理 / Task：优先任务描述，而非文件路径
     if event_name in ("subagentStart", "subagentStop") or tool_name == "Task":
         for key in ("task", "prompt", "description", "agent_message", "text"):

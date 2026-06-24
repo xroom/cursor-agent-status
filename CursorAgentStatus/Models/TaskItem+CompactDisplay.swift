@@ -126,9 +126,47 @@ struct AgentFloatingContent {
     let statusLine: String
     let statusCode: ProStatusCode
     let canStop: Bool
+    let stepStartedAt: Date?
+
+    var showsStepTimer: Bool {
+        stepStartedAt != nil && (statusCode == .run || statusCode == .pnd)
+    }
 }
 
 extension TaskItem {
+    /// 悬浮窗第二行：优先展示思考摘要、Exploring 等阶段状态
+    func floatingStatusLine(headline: String?, thought: String?) -> String {
+        switch kind {
+        case .subagent where isExploreSubagent:
+            let detail = sanitizedFloatingTitle(title, fallback: "", maxLength: 60)
+            return detail.isEmpty ? "Exploring" : "Exploring · \(detail)"
+        case .tool where subtitle == "Task":
+            let detail = sanitizedFloatingTitle(title, fallback: headline ?? "", maxLength: 60)
+            return detail.isEmpty ? "Exploring" : "Exploring · \(detail)"
+        case .thinking:
+            return formattedThought(subtitle ?? thought)
+        default:
+            break
+        }
+
+        if let thought, !thought.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return formattedThought(thought)
+        }
+
+        return floatingActivityTitle(headline: headline)
+    }
+
+    private func formattedThought(_ text: String?) -> String {
+        guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return "思考中…"
+        }
+        return sanitizedFloatingTitle(text, fallback: "思考中…", maxLength: 80)
+    }
+
+    private var isExploreSubagent: Bool {
+        (subtitle ?? "").lowercased() == "explore"
+    }
+
     /// 悬浮窗第一行：正在做什么（自然语言，不暴露 Shell 命令）
     func floatingActivityTitle(headline: String?) -> String {
         switch kind {
@@ -186,11 +224,11 @@ extension TaskItem {
         }
     }
 
-    private func sanitizedFloatingTitle(_ text: String, fallback: String) -> String {
+    private func sanitizedFloatingTitle(_ text: String, fallback: String, maxLength: Int = 60) -> String {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return fallback }
         if looksLikeShellCommand(trimmed) { return fallback }
-        return truncate(trimmed, 60)
+        return truncate(trimmed, maxLength)
     }
 
     private func looksLikeShellCommand(_ text: String) -> Bool {
@@ -231,29 +269,33 @@ extension StatusStore {
         let agentName = agentDisplayName(for: conversationId)
         let runningFor = running.filter { $0.conversationId == conversationId }
         let pendingFor = pending.filter { $0.conversationId == conversationId }
+        let headline = sessionHeadline(for: conversationId)
+        let thought = sessionThought(for: conversationId)
 
-        if let task = runningFor.max(by: { $0.updatedAt < $1.updatedAt }) {
+        if let task = bestRunningTask(for: conversationId, in: runningFor) {
             return AgentFloatingContent(
                 panelId: conversationId,
                 conversationId: conversationId,
                 agentName: agentName,
-                statusLine: task.floatingActivityTitle(headline: sessionHeadline(for: conversationId)),
+                statusLine: task.floatingStatusLine(headline: headline, thought: thought),
                 statusCode: .run,
-                canStop: true
+                canStop: true,
+                stepStartedAt: task.startedAt
             )
         }
 
         if let task = pendingFor.max(by: { $0.updatedAt < $1.updatedAt }) {
             let line = task.kind == .response && task.title == "等待用户输入"
-                ? (sessionHeadline(for: conversationId).map { "等待确认：\($0)" } ?? task.floatingActivityTitle(headline: nil))
-                : task.floatingActivityTitle(headline: sessionHeadline(for: conversationId))
+                ? (headline.map { "等待确认：\($0)" } ?? task.floatingStatusLine(headline: nil, thought: thought))
+                : task.floatingStatusLine(headline: headline, thought: thought)
             return AgentFloatingContent(
                 panelId: conversationId,
                 conversationId: conversationId,
                 agentName: agentName,
                 statusLine: line,
                 statusCode: .pnd,
-                canStop: false
+                canStop: false,
+                stepStartedAt: task.startedAt
             )
         }
 
@@ -266,7 +308,8 @@ extension StatusStore {
                 agentName: agentName,
                 statusLine: recentItem.floatingCompletedTitle(),
                 statusCode: .done,
-                canStop: false
+                canStop: false,
+                stepStartedAt: nil
             )
         }
 
@@ -276,7 +319,8 @@ extension StatusStore {
             agentName: agentName,
             statusLine: "暂无活动",
             statusCode: .idle,
-            canStop: false
+            canStop: false,
+            stepStartedAt: nil
         )
     }
 
@@ -287,13 +331,27 @@ extension StatusStore {
             agentName: "Cursor Agent",
             statusLine: "暂无进行中的任务",
             statusCode: .idle,
-            canStop: false
+            canStop: false,
+            stepStartedAt: nil
         )
     }
 
     private func latestActivity(for conversationId: String) -> Date {
         let items = (running + pending).filter { $0.conversationId == conversationId }
         return items.map(\.updatedAt).max() ?? .distantPast
+    }
+
+    private func bestRunningTask(for conversationId: String, in items: [TaskItem]) -> TaskItem? {
+        let items = items.filter { $0.conversationId == conversationId }
+        guard !items.isEmpty else { return nil }
+
+        let priority: [TaskKind] = [.subagent, .thinking, .processing, .tool, .session]
+        for kind in priority {
+            if let item = items.filter({ $0.kind == kind }).max(by: { $0.updatedAt < $1.updatedAt }) {
+                return item
+            }
+        }
+        return items.max(by: { $0.updatedAt < $1.updatedAt })
     }
 
     func floatingContent(at rotateIndex: Int) -> FloatingPanelContent {
