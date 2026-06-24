@@ -132,14 +132,12 @@ final class FloatingPanelController: NSObject {
         entry.hostingView.layoutSubtreeIfNeeded()
 
         let fitted = entry.hostingView.fittingSize
-        let clampedWidth = min(
-            max(fitted.width, FloatingPanelLayout.minWidth),
-            FloatingPanelLayout.maxWidth
-        )
+        let clampedWidth = min(fitted.width, FloatingPanelLayout.maxWidth)
         let newSize = NSSize(width: clampedWidth, height: max(fitted.height, 48))
 
-        if abs(newSize.width - entry.lastContentSize.width) < 0.5,
-           abs(newSize.height - entry.lastContentSize.height) < 0.5 {
+        if abs(newSize.width - entry.panel.frame.width) < 0.5,
+           abs(newSize.height - entry.panel.frame.height) < 0.5 {
+            entry.lastContentSize = newSize
             return
         }
         entry.lastContentSize = newSize
@@ -166,7 +164,7 @@ final class FloatingPanelController: NSObject {
         let entries = orderedIds.compactMap { panels[$0] }
         guard !entries.isEmpty else { return }
 
-        let widths = entries.map { max($0.lastContentSize.width, $0.panel.frame.width, FloatingPanelLayout.minWidth) }
+        let widths = entries.map(\.lastContentSize.width)
         let totalWidth = widths.reduce(0, +) + panelGap * CGFloat(max(entries.count - 1, 0))
         var x = visible.midX - totalWidth / 2
         let y = visible.minY + dockTopMargin

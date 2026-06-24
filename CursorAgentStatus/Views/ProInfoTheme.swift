@@ -112,9 +112,7 @@ struct ProMetricsRow: View {
 }
 
 enum FloatingPanelLayout {
-    static let minWidth: CGFloat = 200
-    /// 最长不超过最小宽度的一倍（2×）
-    static var maxWidth: CGFloat { minWidth * 2 }
+    static let maxWidth: CGFloat = 400
 }
 
 extension StatusStore {

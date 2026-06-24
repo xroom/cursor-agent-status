@@ -45,7 +45,6 @@ struct FloatingPanelView: View {
                     }
                 }
             }
-            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             .layoutPriority(1)
 
             if content.canStop {
@@ -55,11 +54,8 @@ struct FloatingPanelView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .frame(
-            minWidth: FloatingPanelLayout.minWidth,
-            maxWidth: FloatingPanelLayout.maxWidth,
-            alignment: .leading
-        )
+        .frame(maxWidth: FloatingPanelLayout.maxWidth, alignment: .leading)
+        .fixedSize(horizontal: true, vertical: false)
         .background { ProCardBackground(cornerRadius: 8) }
         .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { date in
             tick = date
