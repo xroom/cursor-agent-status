@@ -360,9 +360,13 @@ final class StatusStore {
 
         if changed {
             revision += 1
+            onStateChange?()
         }
         ComposerNameResolver.shared.refreshIfNeeded()
     }
+
+    /// 状态变更回调（不依赖菜单栏视图生命周期）
+    var onStateChange: (@MainActor () -> Void)?
 
     private func promoteAwaitingInput() {
         let now = Date()

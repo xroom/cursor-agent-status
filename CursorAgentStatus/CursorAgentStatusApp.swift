@@ -2,49 +2,43 @@ import SwiftUI
 
 @main
 struct CursorAgentStatusApp: App {
-    @State private var store = StatusStore()
+    @StateObject private var appState = AppState()
     @AppStorage("showFloatingPanel") private var showFloatingPanel = true
-    @State private var autoHideWhenIdle = false
-
-    private let tailer = EventTailer()
-    private let panelController = FloatingPanelController()
 
     var body: some Scene {
         MenuBarExtra {
             MenuBarView(
-                store: store,
+                store: appState.store,
                 showFloatingPanel: $showFloatingPanel
             )
-            .onAppear {
-                setupEventPipeline()
-                if showFloatingPanel {
-                    panelController.show(store: store)
-                }
-            }
             .onChange(of: showFloatingPanel) { _, visible in
-                if visible {
-                    panelController.show(store: store)
-                } else {
-                    panelController.hide()
-                }
-            }
-            .onChange(of: store.revision) { _, _ in
-                panelController.refreshLayout(store: store)
-                panelController.updateAutoHide(store: store, autoHideWhenIdle: autoHideWhenIdle)
+                AppLaunchCoordinator.setFloatingPanelVisible(
+                    visible,
+                    store: appState.store,
+                    panelController: appState.panelController
+                )
             }
         } label: {
-            StatusBadgeView(iconName: store.statusIconName, activeCount: store.activeCount)
+            StatusBadgeView(
+                iconName: appState.store.statusIconName,
+                activeCount: appState.store.activeCount
+            )
         }
         .menuBarExtraStyle(.window)
     }
+}
 
-    private func setupEventPipeline() {
-        store.bootstrap(from: tailer)
-        tailer.onEvent = { event in
-            Task { @MainActor in
-                store.handle(event)
-            }
-        }
-        tailer.start()
+@MainActor
+final class AppState: ObservableObject {
+    let store = StatusStore()
+    let tailer = EventTailer()
+    let panelController = FloatingPanelController()
+
+    init() {
+        AppLaunchCoordinator.startIfNeeded(
+            store: store,
+            tailer: tailer,
+            panelController: panelController
+        )
     }
 }

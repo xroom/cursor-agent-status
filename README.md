@@ -296,4 +296,4 @@ pkill -x CursorAgentStatus; open DerivedData/.../CursorAgentStatus.app
 
 ## License
 
-暂未指定开源协议。如需二次分发请先与作者确认。
+[MIT License](LICENSE) — 可自由使用、修改、分发与商用，保留版权声明即可。

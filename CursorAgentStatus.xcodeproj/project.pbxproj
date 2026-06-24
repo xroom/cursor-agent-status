@@ -24,6 +24,7 @@
 		A10000000000000000000015 /* ProInfoTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000015 /* ProInfoTheme.swift */; };
 		A10000000000000000000016 /* CursorControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000016 /* CursorControl.swift */; };
 		A10000000000000000000017 /* ComposerNameResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000017 /* ComposerNameResolver.swift */; };
+		A10000000000000000000018 /* AppLaunchCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000018 /* AppLaunchCoordinator.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -44,6 +45,7 @@
 		A20000000000000000000015 /* ProInfoTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProInfoTheme.swift; sourceTree = "<group>"; };
 		A20000000000000000000016 /* CursorControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorControl.swift; sourceTree = "<group>"; };
 		A20000000000000000000017 /* ComposerNameResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerNameResolver.swift; sourceTree = "<group>"; };
+		A20000000000000000000018 /* AppLaunchCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLaunchCoordinator.swift; sourceTree = "<group>"; };
 		A20000000000000000000020 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A20000000000000000000030 /* CursorAgentStatus.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CursorAgentStatus.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -106,6 +108,7 @@
 				A20000000000000000000006 /* StatusStore.swift */,
 				A20000000000000000000016 /* CursorControl.swift */,
 				A20000000000000000000017 /* ComposerNameResolver.swift */,
+				A20000000000000000000018 /* AppLaunchCoordinator.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -212,6 +215,7 @@
 				A10000000000000000000015 /* ProInfoTheme.swift in Sources */,
 				A10000000000000000000016 /* CursorControl.swift in Sources */,
 				A10000000000000000000017 /* ComposerNameResolver.swift in Sources */,
+				A10000000000000000000018 /* AppLaunchCoordinator.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
