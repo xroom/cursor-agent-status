@@ -37,6 +37,8 @@ final class StatusStore {
     private var agentNames: [String: String] = [:]
     /// 最近一次 Agent 思考摘要（afterAgentThought）
     private var conversationThoughts: [String: String] = [:]
+    /// 尚未 sessionEnd 的会话（stop 仅表示单轮结束，不代表会话关闭）
+    private var ongoingConversations: Set<String> = []
     private var pruneTimer: Timer?
 
     var activeCount: Int {
@@ -86,6 +88,7 @@ final class StatusStore {
         conversationHeadlines.removeAll()
         agentNames.removeAll()
         conversationThoughts.removeAll()
+        ongoingConversations.removeAll()
         refreshPublishedLists()
     }
 
@@ -96,6 +99,7 @@ final class StatusStore {
 
         switch event.event {
         case "beforeSubmitPrompt":
+            ongoingConversations.insert(conversationId)
             let promptPreview = event.title ?? "正在处理指令"
             conversationHeadlines[conversationId] = truncated(promptPreview, limit: 80)
             if agentNames[conversationId] == nil {
@@ -119,6 +123,7 @@ final class StatusStore {
             removeAwaitingInput(for: conversationId)
 
         case "afterAgentThought":
+            ongoingConversations.insert(conversationId)
             if let thought = normalizedThoughtText(event.title) {
                 conversationThoughts[conversationId] = thought
             }
@@ -138,6 +143,7 @@ final class StatusStore {
             sessions[conversationId] = item
 
         case "sessionStart":
+            ongoingConversations.insert(conversationId)
             registerAgentName(from: event, conversationId: conversationId)
             let item = TaskItem(
                 id: "session-\(conversationId)",
@@ -156,6 +162,7 @@ final class StatusStore {
             lastResponseAt.removeValue(forKey: conversationId)
 
         case "sessionEnd":
+            ongoingConversations.remove(conversationId)
             conversationHeadlines.removeValue(forKey: conversationId)
             agentNames.removeValue(forKey: conversationId)
             conversationThoughts.removeValue(forKey: conversationId)
@@ -174,6 +181,7 @@ final class StatusStore {
             subagents = subagents.filter { $0.value.conversationId != conversationId }
 
         case "preToolUse":
+            ongoingConversations.insert(conversationId)
             sessions.removeValue(forKey: conversationId) // 清除「处理中/思考中」占位
             guard let toolUseId = event.toolUseId else { break }
             let item = TaskItem(
@@ -215,6 +223,7 @@ final class StatusStore {
             }
 
         case "subagentStart":
+            ongoingConversations.insert(conversationId)
             let key = event.subagentId ?? event.toolUseId ?? UUID().uuidString
             let item = TaskItem(
                 id: "subagent-\(key)",
@@ -495,6 +504,10 @@ final class StatusStore {
                 lastResponseAt.removeValue(forKey: conversationId)
             }
         }
+        ongoingConversations = ongoingConversations.filter { conversationId in
+            guard let last = lastActivityAt[conversationId] else { return false }
+            return now.timeIntervalSince(last) < staleSessionTTL
+        }
     }
 
     private func clearRunningTools(for conversationId: String) {
@@ -545,6 +558,18 @@ final class StatusStore {
     func sessionThought(for conversationId: String?) -> String? {
         guard let conversationId else { return nil }
         return conversationThoughts[conversationId]
+    }
+
+    func isOngoingConversation(_ conversationId: String) -> Bool {
+        ongoingConversations.contains(conversationId)
+    }
+
+    func ongoingConversationIdList() -> [String] {
+        Array(ongoingConversations)
+    }
+
+    func conversationLastActivity(_ conversationId: String) -> Date? {
+        lastActivityAt[conversationId]
     }
 
     private func normalizedThoughtText(_ text: String?) -> String? {

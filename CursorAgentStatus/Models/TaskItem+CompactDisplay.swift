@@ -254,6 +254,10 @@ extension StatusStore {
             guard let id = item.conversationId, isTrackableConversationId(id) else { continue }
             conversationIds.insert(id)
         }
+        for id in ongoingConversationIdList() {
+            guard isTrackableConversationId(id) else { continue }
+            conversationIds.insert(id)
+        }
 
         return conversationIds
             .sorted { latestActivity(for: $0) > latestActivity(for: $1) }
@@ -299,6 +303,18 @@ extension StatusStore {
             )
         }
 
+        if isOngoingConversation(conversationId) {
+            return AgentFloatingContent(
+                panelId: conversationId,
+                conversationId: conversationId,
+                agentName: agentName,
+                statusLine: ongoingStatusLine(headline: headline, thought: thought),
+                statusCode: .run,
+                canStop: true,
+                stepStartedAt: conversationLastActivity(conversationId)
+            )
+        }
+
         if let recentItem = recent
             .filter({ $0.conversationId == conversationId })
             .max(by: { $0.updatedAt < $1.updatedAt }) {
@@ -338,7 +354,16 @@ extension StatusStore {
 
     private func latestActivity(for conversationId: String) -> Date {
         let items = (running + pending).filter { $0.conversationId == conversationId }
-        return items.map(\.updatedAt).max() ?? .distantPast
+        if let latest = items.map(\.updatedAt).max() {
+            return latest
+        }
+        return conversationLastActivity(conversationId) ?? .distantPast
+    }
+
+    private func ongoingStatusLine(headline: String?, thought: String?) -> String {
+        if let thought, !thought.isEmpty { return thought }
+        if let headline, !headline.isEmpty { return headline }
+        return "处理中…"
     }
 
     private func bestRunningTask(for conversationId: String, in items: [TaskItem]) -> TaskItem? {
