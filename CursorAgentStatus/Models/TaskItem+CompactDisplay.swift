@@ -35,9 +35,26 @@ extension TaskItem {
         }
     }
 
-    /// 悬浮窗「刚完成」单行摘要
+    /// 悬浮窗「刚完成」：优先显示 Hook 总结
     var compactRecentText: String {
-        title
+        floatingCompletedTitle()
+    }
+
+    /// 任务完成后的悬浮窗标题
+    func floatingCompletedTitle() -> String {
+        if let summary, !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return sanitizedFloatingTitle(summary, fallback: completionFallbackTitle)
+        }
+        return sanitizedFloatingTitle(title, fallback: completionFallbackTitle)
+    }
+
+    private var completionFallbackTitle: String {
+        switch kind {
+        case .stop: return "任务已完成"
+        case .subagent: return "子任务已完成"
+        case .response: return "Agent 已回复"
+        default: return "已完成"
+        }
     }
 
     var categoryLabel: String {
@@ -103,7 +120,138 @@ struct CompactStatusLine {
     let category: TaskCategory
 }
 
+struct FloatingPanelContent {
+    let activityTitle: String
+    let projectName: String
+    let runningCount: Int
+    let isIdle: Bool
+    let isCompleted: Bool
+}
+
+extension TaskItem {
+    /// 悬浮窗第一行：正在做什么（自然语言，不暴露 Shell 命令）
+    func floatingActivityTitle(headline: String?) -> String {
+        switch kind {
+        case .processing:
+            if title.hasPrefix("处理中:") {
+                let rest = title.dropFirst("处理中:".count).trimmingCharacters(in: .whitespaces)
+                return rest.isEmpty ? (headline ?? "处理指令") : String(rest)
+            }
+            return headline ?? title
+        case .thinking:
+            if let subtitle, !subtitle.isEmpty { return subtitle }
+            return headline ?? "思考中…"
+        case .subagent:
+            return sanitizedFloatingTitle(title, fallback: headline ?? "子任务进行中")
+        case .tool:
+            return floatingToolActivity(headline: headline)
+        case .session:
+            return headline ?? sanitizedFloatingTitle(title, fallback: "Agent 会话")
+        default:
+            return headline ?? sanitizedFloatingTitle(title, fallback: "处理中…")
+        }
+    }
+
+    private func floatingToolActivity(headline: String?) -> String {
+        let tool = subtitle ?? ""
+        switch tool {
+        case "Shell":
+            return headline ?? "正在处理…"
+        case "Task":
+            return sanitizedFloatingTitle(title, fallback: headline ?? "子任务进行中")
+        case "SemanticSearch":
+            return headline ?? "搜索代码库"
+        case "Grep":
+            return headline ?? "搜索代码"
+        case "Glob":
+            return headline ?? "查找文件"
+        case "Read":
+            if let headline, !headline.isEmpty { return headline }
+            let file = fileName(from: title)
+            return file.isEmpty ? "查看代码" : "查看 \(file)"
+        case "Write", "StrReplace", "ApplyPatch", "EditNotebook":
+            if let headline, !headline.isEmpty { return headline }
+            let file = fileName(from: title)
+            return file.isEmpty ? "修改代码" : "修改 \(file)"
+        case "Delete":
+            if let headline, !headline.isEmpty { return headline }
+            let file = fileName(from: title)
+            return file.isEmpty ? "删除文件" : "删除 \(file)"
+        default:
+            if let headline, !headline.isEmpty { return headline }
+            if !title.isEmpty, title != tool {
+                return sanitizedFloatingTitle(title, fallback: "处理中…")
+            }
+            return "处理中…"
+        }
+    }
+
+    private func sanitizedFloatingTitle(_ text: String, fallback: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return fallback }
+        if looksLikeShellCommand(trimmed) { return fallback }
+        return truncate(trimmed, 60)
+    }
+
+    private func looksLikeShellCommand(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        let prefixes = [
+            "cd ", "npm ", "git ", "curl ", "bash ", "python ", "pnpm ", "yarn ",
+            "xcodebuild", "sudo ", "make ", "docker ", "kubectl ", "./"
+        ]
+        if prefixes.contains(where: { lower.hasPrefix($0) }) { return true }
+        return text.contains("&&") || text.contains(" | ") || text.hasPrefix("/bin/")
+    }
+}
+
 extension StatusStore {
+    var floatingRunningTasksOrdered: [TaskItem] {
+        running.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    func floatingContent(at rotateIndex: Int) -> FloatingPanelContent {
+        let tasks = floatingRunningTasksOrdered
+        if !tasks.isEmpty {
+            let index = rotateIndex % tasks.count
+            let task = tasks[index]
+            return FloatingPanelContent(
+                activityTitle: task.floatingActivityTitle(headline: sessionHeadline(for: task.conversationId)),
+                projectName: task.workspaceName,
+                runningCount: tasks.count,
+                isIdle: false,
+                isCompleted: false
+            )
+        }
+
+        if let pending = pending.sorted(by: { $0.updatedAt > $1.updatedAt }).first {
+            return FloatingPanelContent(
+                activityTitle: pending.floatingActivityTitle(headline: sessionHeadline(for: pending.conversationId)),
+                projectName: pending.workspaceName,
+                runningCount: 0,
+                isIdle: false,
+                isCompleted: false
+            )
+        }
+
+        if let recentItem = recent.sorted(by: { $0.updatedAt > $1.updatedAt }).first {
+            return FloatingPanelContent(
+                activityTitle: recentItem.floatingCompletedTitle(),
+                projectName: recentItem.workspaceName,
+                runningCount: 0,
+                isIdle: false,
+                isCompleted: true
+            )
+        }
+
+        return FloatingPanelContent(
+            activityTitle: "暂无进行中的任务",
+            projectName: "—",
+            runningCount: 0,
+            isIdle: true,
+            isCompleted: false
+        )
+    }
+
     var latestTaskItem: TaskItem? {
         let all = running + pending + recent
         return all.max(by: { $0.updatedAt < $1.updatedAt })

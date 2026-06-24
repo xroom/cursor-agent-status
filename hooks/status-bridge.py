@@ -9,7 +9,26 @@ from pathlib import Path
 
 
 def pick_title(data: dict) -> str | None:
+    event_name = data.get("hook_event_name") or data.get("event") or ""
     tool_name = data.get("tool_name")
+
+    # 子代理 / Task：优先任务描述，而非文件路径
+    if event_name in ("subagentStart", "subagentStop") or tool_name == "Task":
+        for key in ("task", "prompt", "description", "agent_message", "text"):
+            value = data.get(key)
+            if isinstance(value, str) and value.strip():
+                text = value.strip()
+                return text[:120] + ("…" if len(text) > 120 else "")
+
+    # Shell：不在 title 里暴露命令，留给会话级 headline
+    if tool_name == "Shell" or event_name in ("beforeShellExecution", "afterShellExecution"):
+        for key in ("prompt", "task", "description", "agent_message", "text"):
+            value = data.get(key)
+            if isinstance(value, str) and value.strip():
+                text = value.strip()
+                return text[:120] + ("…" if len(text) > 120 else "")
+        return None
+
     tool_input = data.get("tool_input")
     if isinstance(tool_input, dict):
         for key in ("path", "file_path", "target_file"):
@@ -30,6 +49,21 @@ def pick_title(data: dict) -> str | None:
             if isinstance(value, str) and value.strip():
                 text = value.strip()
                 return text[:120] + ("…" if len(text) > 120 else "")
+    return None
+
+
+def pick_summary(data: dict) -> str | None:
+    summary = data.get("summary")
+    if isinstance(summary, str) and summary.strip():
+        text = summary.strip()
+        return text[:200] + ("…" if len(text) > 200 else "")
+
+    for key in ("agent_message", "result", "output", "text", "message"):
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            text = value.strip()
+            return text[:200] + ("…" if len(text) > 200 else "")
+
     return None
 
 
@@ -74,7 +108,7 @@ def main() -> int:
         "duration_ms": payload.get("duration_ms") or payload.get("duration"),
         "is_background_agent": payload.get("is_background_agent"),
         "composer_mode": payload.get("composer_mode"),
-        "summary": payload.get("summary"),
+        "summary": pick_summary(payload),
     }
 
     line = json.dumps(normalized, ensure_ascii=False, separators=(",", ":"))

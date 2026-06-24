@@ -31,6 +31,8 @@ final class StatusStore {
     private var pendingShellMCP: [String: TaskItem] = [:]
     private var lastResponseAt: [String: Date] = [:]
     private var lastActivityAt: [String: Date] = [:]
+    /// 每个会话的用户指令摘要，用于悬浮窗展示「正在做什么」
+    private var conversationHeadlines: [String: String] = [:]
     private var pruneTimer: Timer?
 
     var activeCount: Int {
@@ -77,6 +79,7 @@ final class StatusStore {
         pendingShellMCP.removeAll()
         lastResponseAt.removeAll()
         lastActivityAt.removeAll()
+        conversationHeadlines.removeAll()
         refreshPublishedLists()
     }
 
@@ -88,6 +91,7 @@ final class StatusStore {
         switch event.event {
         case "beforeSubmitPrompt":
             let promptPreview = event.title ?? "正在处理指令"
+            conversationHeadlines[conversationId] = truncated(promptPreview, limit: 80)
             let item = TaskItem(
                 id: "processing-\(conversationId)",
                 category: .running,
@@ -139,9 +143,10 @@ final class StatusStore {
             lastResponseAt.removeValue(forKey: conversationId)
 
         case "sessionEnd":
+            conversationHeadlines.removeValue(forKey: conversationId)
             if let session = sessions.removeValue(forKey: conversationId) {
                 if event.status == "completed" || event.status == nil {
-                    addRecent(from: session, title: "会话已结束", at: now)
+                    addRecent(from: session, title: "会话已结束", summary: event.summary ?? event.title, at: now)
                 }
             }
             clearPending(for: conversationId)
@@ -210,22 +215,28 @@ final class StatusStore {
         case "subagentStop":
             let key = event.subagentId ?? event.toolUseId ?? ""
             if let item = subagents.removeValue(forKey: key) {
-                let title = event.summary ?? event.title ?? item.title
-                addRecent(from: item, title: "Subagent: \(title)", at: now, status: event.status)
-            } else if let title = event.title ?? event.summary {
+                addRecent(
+                    from: item,
+                    title: "Subagent 完成",
+                    summary: event.summary ?? event.title,
+                    at: now,
+                    status: event.status
+                )
+            } else if event.summary != nil || event.title != nil {
                 addRecent(
                     TaskItem(
                         id: "subagent-done-\(UUID().uuidString)",
                         category: .recent,
                         kind: .subagent,
-                        title: title,
+                        title: "Subagent 完成",
                         subtitle: event.subagentType,
                         conversationId: event.conversationId,
                         workspace: event.workspace,
                         transcriptPath: event.transcriptPath,
                         startedAt: now,
                         updatedAt: now,
-                        expiresAt: now.addingTimeInterval(recentTTL)
+                        expiresAt: now.addingTimeInterval(recentTTL),
+                        summary: event.summary ?? event.title
                     )
                 )
             }
@@ -254,14 +265,15 @@ final class StatusStore {
                     id: "response-\(conversationId)-\(Int(now.timeIntervalSince1970))",
                     category: .recent,
                     kind: .response,
-                    title: truncated(event.title ?? "Agent 已回复"),
+                    title: "Agent 已回复",
                     subtitle: "等待你的下一步",
                     conversationId: event.conversationId,
                     workspace: event.workspace,
                     transcriptPath: event.transcriptPath,
                     startedAt: now,
                     updatedAt: now,
-                    expiresAt: now.addingTimeInterval(recentTTL)
+                    expiresAt: now.addingTimeInterval(recentTTL),
+                    summary: event.summary ?? event.title
                 )
             )
 
@@ -272,6 +284,7 @@ final class StatusStore {
             removeAwaitingInput(for: conversationId)
             if event.status == "completed" || event.status == "aborted" {
                 sessions.removeValue(forKey: conversationId)
+                conversationHeadlines.removeValue(forKey: conversationId)
             }
             if event.status == "completed" {
                 addRecent(
@@ -286,7 +299,8 @@ final class StatusStore {
                         transcriptPath: event.transcriptPath,
                         startedAt: now,
                         updatedAt: now,
-                        expiresAt: now.addingTimeInterval(recentTTL)
+                        expiresAt: now.addingTimeInterval(recentTTL),
+                        summary: event.summary ?? event.title
                     )
                 )
             }
@@ -361,7 +375,7 @@ final class StatusStore {
         keys.forEach { pendingShellMCP.removeValue(forKey: $0) }
     }
 
-    private func addRecent(from item: TaskItem, title: String, at date: Date, status: String? = nil) {
+    private func addRecent(from item: TaskItem, title: String, summary: String? = nil, at date: Date, status: String? = nil) {
         let final = TaskItem(
             id: "recent-\(item.id)-\(Int(date.timeIntervalSince1970))",
             category: .recent,
@@ -373,7 +387,8 @@ final class StatusStore {
             transcriptPath: item.transcriptPath,
             startedAt: item.startedAt,
             updatedAt: date,
-            expiresAt: date.addingTimeInterval(recentTTL)
+            expiresAt: date.addingTimeInterval(recentTTL),
+            summary: summary ?? item.summary
         )
         addRecent(final)
     }
@@ -468,6 +483,11 @@ final class StatusStore {
 
     func stopActiveAgent() {
         CursorControl.cancelGeneration()
+    }
+
+    func sessionHeadline(for conversationId: String?) -> String? {
+        guard let conversationId else { return nil }
+        return conversationHeadlines[conversationId]
     }
 
     func openTranscript(for item: TaskItem) {

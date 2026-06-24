@@ -30,6 +30,8 @@ struct TaskItem: Identifiable, Codable, Sendable, Hashable {
     let startedAt: Date
     var updatedAt: Date
     var expiresAt: Date?
+    /// 任务完成后的总结（来自 Hook 的 summary 字段）
+    var summary: String? = nil
 
     var workspaceName: String {
         guard let workspace else { return "未知工作区" }

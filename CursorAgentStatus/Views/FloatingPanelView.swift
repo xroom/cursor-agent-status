@@ -3,25 +3,45 @@ import SwiftUI
 struct FloatingPanelView: View {
     @Bindable var store: StatusStore
 
+    @State private var rotateIndex = 0
+
+    private let rotateInterval: TimeInterval = 3
+
     private var statusCode: ProStatusCode {
-        ProStatusCode(trafficLight: store.trafficLightState)
+        if content.isCompleted { return .done }
+        return ProStatusCode(trafficLight: store.trafficLightState)
+    }
+
+    private var content: FloatingPanelContent {
+        store.floatingContent(at: rotateIndex)
     }
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .center, spacing: 8) {
             ProStatusTag(code: statusCode)
 
-            Text(timestampText)
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .fixedSize()
+            VStack(alignment: .leading, spacing: 2) {
+                Text(content.activityTitle)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .animation(.easeInOut(duration: 0.2), value: content.activityTitle)
 
-            Text(store.proSummaryLine)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .layoutPriority(1)
+                HStack(spacing: 4) {
+                    Text(content.projectName)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+
+                    if content.runningCount > 1 {
+                        Text("· \(rotateIndex + 1)/\(content.runningCount)")
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+            .layoutPriority(1)
 
             if store.canStopAgent {
                 stopButton
@@ -36,13 +56,13 @@ struct FloatingPanelView: View {
         )
         .fixedSize(horizontal: true, vertical: false)
         .background { ProCardBackground(cornerRadius: 8) }
-    }
-
-    private var timestampText: String {
-        if let item = store.latestTaskItem {
-            return item.relativeTime
+        .onChange(of: store.revision) { _, _ in
+            clampRotateIndex()
         }
-        return "—"
+        .onReceive(Timer.publish(every: rotateInterval, on: .main, in: .common).autoconnect()) { _ in
+            guard store.floatingRunningTasksOrdered.count > 1 else { return }
+            rotateIndex = (rotateIndex + 1) % store.floatingRunningTasksOrdered.count
+        }
     }
 
     private var stopButton: some View {
@@ -58,5 +78,14 @@ struct FloatingPanelView: View {
         }
         .buttonStyle(.plain)
         .help("停止 Agent (⌘⇧⌫)")
+    }
+
+    private func clampRotateIndex() {
+        let count = store.floatingRunningTasksOrdered.count
+        guard count > 0 else {
+            rotateIndex = 0
+            return
+        }
+        rotateIndex = rotateIndex % count
     }
 }

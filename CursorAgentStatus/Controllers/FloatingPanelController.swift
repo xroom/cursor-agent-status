@@ -87,7 +87,7 @@ final class FloatingPanelController: NSObject {
         )
         let newSize = NSSize(
             width: clampedWidth,
-            height: max(fitted.height, 36)
+            height: max(fitted.height, 44)
         )
 
         // 尺寸没变就不动窗口，避免每秒重复 setFrame 导致抖动
