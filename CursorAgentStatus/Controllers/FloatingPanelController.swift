@@ -1,62 +1,45 @@
 import AppKit
 import SwiftUI
 
+private final class AgentPanelWindow {
+    let panelId: String
+    let panel: NSPanel
+    var hostingView: NSHostingView<FloatingPanelView>
+    var lastContentSize = NSSize.zero
+
+    init(panelId: String, panel: NSPanel, hostingView: NSHostingView<FloatingPanelView>) {
+        self.panelId = panelId
+        self.panel = panel
+        self.hostingView = hostingView
+    }
+}
+
 @MainActor
 final class FloatingPanelController: NSObject {
-    private var panel: NSPanel?
-    private var hostingView: NSHostingView<FloatingPanelView>?
-    private var lastContentSize = NSSize.zero
-    private var hasPlacedInitially = false
+    private var panels: [String: AgentPanelWindow] = [:]
+    private var isEnabled = false
 
     /// 悬浮窗底边与 Dock 可见区域顶部的间距
     private let dockTopMargin: CGFloat = 12
+    private let panelGap: CGFloat = 12
 
-    var isVisible: Bool { panel?.isVisible == true }
+    var isVisible: Bool { panels.values.contains { $0.panel.isVisible } }
 
     func show(store: StatusStore) {
-        if panel == nil {
-            let panel = NSPanel(
-                contentRect: NSRect(x: 0, y: 0, width: 300, height: 44),
-                styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
-                backing: .buffered,
-                defer: false
-            )
-            panel.isOpaque = false
-            panel.backgroundColor = .clear
-            panel.hasShadow = false
-            panel.level = .floating
-            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
-            panel.isMovableByWindowBackground = true
-            panel.isReleasedWhenClosed = false
-            panel.hidesOnDeactivate = false
-            self.panel = panel
-        }
-
-        if hostingView == nil {
-            let hosting = NSHostingView(rootView: FloatingPanelView(store: store))
-            hosting.translatesAutoresizingMaskIntoConstraints = false
-            hosting.wantsLayer = true
-            hosting.layer?.backgroundColor = NSColor.clear.cgColor
-            panel?.contentView = hosting
-            hostingView = hosting
-        }
-
-        if !hasPlacedInitially {
-            resizeToFitContent(preserveCenter: false)
-            positionAboveDockCentered()
-            hasPlacedInitially = true
-        } else {
-            resizeToFitContent(preserveCenter: true)
-        }
-        panel?.orderFrontRegardless()
+        isEnabled = true
+        sync(store: store)
     }
 
     func hide() {
-        panel?.orderOut(nil)
+        isEnabled = false
+        for entry in panels.values {
+            entry.panel.orderOut(nil)
+        }
+        panels.removeAll()
     }
 
     func toggle(store: StatusStore) {
-        if isVisible {
+        if isEnabled && isVisible {
             hide()
         } else {
             show(store: store)
@@ -64,9 +47,8 @@ final class FloatingPanelController: NSObject {
     }
 
     func refreshLayout(store: StatusStore) {
-        guard isVisible else { return }
-        // @Observable 会自动刷新视图；内容尺寸变化时以当前位置为中心缩放
-        resizeToFitContent(preserveCenter: true)
+        guard isEnabled else { return }
+        sync(store: store)
     }
 
     func updateAutoHide(store: StatusStore, autoHideWhenIdle: Bool) {
@@ -76,52 +58,128 @@ final class FloatingPanelController: NSObject {
         }
     }
 
-    private func resizeToFitContent(preserveCenter: Bool) {
-        guard let hostingView, let panel else { return }
-        hostingView.layoutSubtreeIfNeeded()
+    private func sync(store: StatusStore) {
+        let agents = store.activeFloatingAgents()
+        let activeIds = Set(agents.map(\.panelId))
 
-        let fitted = hostingView.fittingSize
+        for id in panels.keys where !activeIds.contains(id) {
+            panels[id]?.panel.orderOut(nil)
+            panels.removeValue(forKey: id)
+        }
+
+        for content in agents {
+            upsertPanel(content: content, store: store)
+        }
+
+        if agents.isEmpty {
+            panels.values.forEach { $0.panel.orderOut(nil) }
+            panels.removeAll()
+        } else {
+            layoutPanels(orderedIds: agents.map(\.panelId))
+        }
+    }
+
+    private func upsertPanel(content: AgentFloatingContent, store: StatusStore) {
+        let panelId = content.panelId
+
+        if let existing = panels[panelId] {
+            existing.hostingView.rootView = FloatingPanelView(
+                store: store,
+                conversationId: content.conversationId
+            )
+            resizePanel(existing, preservePosition: true)
+            if !existing.panel.isVisible {
+                existing.panel.orderFrontRegardless()
+            }
+            return
+        }
+
+        let panel = makePanel()
+        let hosting = NSHostingView(
+            rootView: FloatingPanelView(store: store, conversationId: content.conversationId)
+        )
+        hosting.translatesAutoresizingMaskIntoConstraints = false
+        hosting.wantsLayer = true
+        hosting.layer?.backgroundColor = NSColor.clear.cgColor
+        panel.contentView = hosting
+
+        let entry = AgentPanelWindow(panelId: panelId, panel: panel, hostingView: hosting)
+        panels[panelId] = entry
+
+        resizePanel(entry, preservePosition: false)
+        panel.orderFrontRegardless()
+    }
+
+    private func makePanel() -> NSPanel {
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 300, height: 52),
+            styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+        panel.isMovableByWindowBackground = true
+        panel.isReleasedWhenClosed = false
+        panel.hidesOnDeactivate = false
+        return panel
+    }
+
+    private func resizePanel(_ entry: AgentPanelWindow, preservePosition: Bool) {
+        entry.hostingView.layoutSubtreeIfNeeded()
+
+        let fitted = entry.hostingView.fittingSize
         let clampedWidth = min(
             max(fitted.width, FloatingPanelLayout.minWidth),
             FloatingPanelLayout.maxWidth
         )
-        let newSize = NSSize(
-            width: clampedWidth,
-            height: max(fitted.height, 44)
-        )
+        let newSize = NSSize(width: clampedWidth, height: max(fitted.height, 48))
 
-        // 尺寸没变就不动窗口，避免每秒重复 setFrame 导致抖动
-        if abs(newSize.width - lastContentSize.width) < 0.5,
-           abs(newSize.height - lastContentSize.height) < 0.5 {
+        if abs(newSize.width - entry.lastContentSize.width) < 0.5,
+           abs(newSize.height - entry.lastContentSize.height) < 0.5 {
             return
         }
-        lastContentSize = newSize
+        entry.lastContentSize = newSize
 
-        let oldFrame = panel.frame
+        let oldFrame = entry.panel.frame
         var newFrame = NSRect(origin: oldFrame.origin, size: newSize)
 
-        if preserveCenter {
-            let centerX = oldFrame.midX
-            let centerY = oldFrame.midY
-            newFrame.origin.x = centerX - newSize.width / 2
-            newFrame.origin.y = centerY - newSize.height / 2
+        if preservePosition {
+            let topY = oldFrame.maxY
+            newFrame.origin.x = oldFrame.origin.x
+            newFrame.origin.y = topY - newSize.height
         }
 
-        panel.setFrame(newFrame, display: true)
+        entry.panel.setFrame(newFrame, display: true)
     }
 
-    /// 水平居中，紧贴 Dock 可见区域上方（`visibleFrame` 已排除 Dock 与菜单栏）
-    private func positionAboveDockCentered() {
-        guard let panel else { return }
+    private func layoutPanels(orderedIds: [String]) {
+        guard !orderedIds.isEmpty else { return }
 
-        let screen = panel.screen ?? NSScreen.main ?? NSScreen.screens.first
+        let screen = NSScreen.main ?? NSScreen.screens.first
         guard let screen else { return }
 
         let visible = screen.visibleFrame
-        let size = panel.frame.size
+        let entries = orderedIds.compactMap { panels[$0] }
+        guard !entries.isEmpty else { return }
 
-        let x = visible.midX - size.width / 2
+        let widths = entries.map { max($0.lastContentSize.width, $0.panel.frame.width, FloatingPanelLayout.minWidth) }
+        let totalWidth = widths.reduce(0, +) + panelGap * CGFloat(max(entries.count - 1, 0))
+        var x = visible.midX - totalWidth / 2
         let y = visible.minY + dockTopMargin
-        panel.setFrameOrigin(NSPoint(x: x, y: y))
+
+        for (index, entry) in entries.enumerated() {
+            let width = widths[index]
+            var frame = entry.panel.frame
+            if abs(frame.width - width) > 0.5 {
+                frame.size.width = width
+                entry.panel.setFrame(frame, display: false)
+            }
+            entry.panel.setFrameOrigin(NSPoint(x: x, y: y))
+            x += width + panelGap
+        }
     }
 }

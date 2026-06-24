@@ -40,21 +40,12 @@ extension TaskItem {
         floatingCompletedTitle()
     }
 
-    /// 任务完成后的悬浮窗标题
+    /// 任务完成后的展示文案：仅显示 Hook summary
     func floatingCompletedTitle() -> String {
         if let summary, !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return sanitizedFloatingTitle(summary, fallback: completionFallbackTitle)
+            return sanitizedFloatingTitle(summary, fallback: "")
         }
-        return sanitizedFloatingTitle(title, fallback: completionFallbackTitle)
-    }
-
-    private var completionFallbackTitle: String {
-        switch kind {
-        case .stop: return "任务已完成"
-        case .subagent: return "子任务已完成"
-        case .response: return "Agent 已回复"
-        default: return "已完成"
-        }
+        return sanitizedFloatingTitle(title, fallback: "")
     }
 
     var categoryLabel: String {
@@ -126,6 +117,15 @@ struct FloatingPanelContent {
     let runningCount: Int
     let isIdle: Bool
     let isCompleted: Bool
+}
+
+struct AgentFloatingContent {
+    let panelId: String
+    let conversationId: String?
+    let agentName: String
+    let statusLine: String
+    let statusCode: ProStatusCode
+    let canStop: Bool
 }
 
 extension TaskItem {
@@ -207,6 +207,93 @@ extension TaskItem {
 extension StatusStore {
     var floatingRunningTasksOrdered: [TaskItem] {
         running.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    /// 每个活跃 Agent（会话）对应一个悬浮窗
+    func activeFloatingAgents() -> [AgentFloatingContent] {
+        var conversationIds = Set<String>()
+        for item in running + pending {
+            guard let id = item.conversationId, isTrackableConversationId(id) else { continue }
+            conversationIds.insert(id)
+        }
+
+        return conversationIds
+            .sorted { latestActivity(for: $0) > latestActivity(for: $1) }
+            .map { floatingContent(for: $0) }
+    }
+
+    private func isTrackableConversationId(_ id: String) -> Bool {
+        let pattern = #"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"#
+        return id.range(of: pattern, options: .regularExpression) != nil
+    }
+
+    func floatingContent(for conversationId: String) -> AgentFloatingContent {
+        let agentName = agentDisplayName(for: conversationId)
+        let runningFor = running.filter { $0.conversationId == conversationId }
+        let pendingFor = pending.filter { $0.conversationId == conversationId }
+
+        if let task = runningFor.max(by: { $0.updatedAt < $1.updatedAt }) {
+            return AgentFloatingContent(
+                panelId: conversationId,
+                conversationId: conversationId,
+                agentName: agentName,
+                statusLine: task.floatingActivityTitle(headline: sessionHeadline(for: conversationId)),
+                statusCode: .run,
+                canStop: true
+            )
+        }
+
+        if let task = pendingFor.max(by: { $0.updatedAt < $1.updatedAt }) {
+            let line = task.kind == .response && task.title == "等待用户输入"
+                ? (sessionHeadline(for: conversationId).map { "等待确认：\($0)" } ?? task.floatingActivityTitle(headline: nil))
+                : task.floatingActivityTitle(headline: sessionHeadline(for: conversationId))
+            return AgentFloatingContent(
+                panelId: conversationId,
+                conversationId: conversationId,
+                agentName: agentName,
+                statusLine: line,
+                statusCode: .pnd,
+                canStop: false
+            )
+        }
+
+        if let recentItem = recent
+            .filter({ $0.conversationId == conversationId })
+            .max(by: { $0.updatedAt < $1.updatedAt }) {
+            return AgentFloatingContent(
+                panelId: conversationId,
+                conversationId: conversationId,
+                agentName: agentName,
+                statusLine: recentItem.floatingCompletedTitle(),
+                statusCode: .done,
+                canStop: false
+            )
+        }
+
+        return AgentFloatingContent(
+            panelId: conversationId,
+            conversationId: conversationId,
+            agentName: agentName,
+            statusLine: "暂无活动",
+            statusCode: .idle,
+            canStop: false
+        )
+    }
+
+    func floatingIdleContent() -> AgentFloatingContent {
+        AgentFloatingContent(
+            panelId: "__idle__",
+            conversationId: nil,
+            agentName: "Cursor Agent",
+            statusLine: "暂无进行中的任务",
+            statusCode: .idle,
+            canStop: false
+        )
+    }
+
+    private func latestActivity(for conversationId: String) -> Date {
+        let items = (running + pending).filter { $0.conversationId == conversationId }
+        return items.map(\.updatedAt).max() ?? .distantPast
     }
 
     func floatingContent(at rotateIndex: Int) -> FloatingPanelContent {

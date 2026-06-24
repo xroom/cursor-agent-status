@@ -50,6 +50,7 @@ struct ProStatusTag: View {
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
                     .strokeBorder(code.tint.opacity(0.25), lineWidth: 0.5)
             )
+            .fixedSize(horizontal: true, vertical: false)
     }
 }
 

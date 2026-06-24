@@ -33,6 +33,8 @@ final class StatusStore {
     private var lastActivityAt: [String: Date] = [:]
     /// 每个会话的用户指令摘要，用于悬浮窗展示「正在做什么」
     private var conversationHeadlines: [String: String] = [:]
+    /// 每个会话的 Agent 显示名称
+    private var agentNames: [String: String] = [:]
     private var pruneTimer: Timer?
 
     var activeCount: Int {
@@ -80,6 +82,7 @@ final class StatusStore {
         lastResponseAt.removeAll()
         lastActivityAt.removeAll()
         conversationHeadlines.removeAll()
+        agentNames.removeAll()
         refreshPublishedLists()
     }
 
@@ -92,6 +95,9 @@ final class StatusStore {
         case "beforeSubmitPrompt":
             let promptPreview = event.title ?? "正在处理指令"
             conversationHeadlines[conversationId] = truncated(promptPreview, limit: 80)
+            if agentNames[conversationId] == nil {
+                registerAgentName(from: event, conversationId: conversationId)
+            }
             let item = TaskItem(
                 id: "processing-\(conversationId)",
                 category: .running,
@@ -126,6 +132,7 @@ final class StatusStore {
             sessions[conversationId] = item
 
         case "sessionStart":
+            registerAgentName(from: event, conversationId: conversationId)
             let item = TaskItem(
                 id: "session-\(conversationId)",
                 category: .running,
@@ -144,9 +151,14 @@ final class StatusStore {
 
         case "sessionEnd":
             conversationHeadlines.removeValue(forKey: conversationId)
+            agentNames.removeValue(forKey: conversationId)
             if let session = sessions.removeValue(forKey: conversationId) {
                 if event.status == "completed" || event.status == nil {
-                    addRecent(from: session, title: "会话已结束", summary: event.summary ?? event.title, at: now)
+                    addRecent(
+                        from: session,
+                        summary: event.summary ?? event.title,
+                        at: now
+                    )
                 }
             }
             clearPending(for: conversationId)
@@ -217,18 +229,17 @@ final class StatusStore {
             if let item = subagents.removeValue(forKey: key) {
                 addRecent(
                     from: item,
-                    title: "Subagent 完成",
                     summary: event.summary ?? event.title,
                     at: now,
                     status: event.status
                 )
-            } else if event.summary != nil || event.title != nil {
+            } else if let summary = normalizedRecentText(event.summary ?? event.title) {
                 addRecent(
                     TaskItem(
                         id: "subagent-done-\(UUID().uuidString)",
                         category: .recent,
                         kind: .subagent,
-                        title: "Subagent 完成",
+                        title: summary,
                         subtitle: event.subagentType,
                         conversationId: event.conversationId,
                         workspace: event.workspace,
@@ -236,7 +247,7 @@ final class StatusStore {
                         startedAt: now,
                         updatedAt: now,
                         expiresAt: now.addingTimeInterval(recentTTL),
-                        summary: event.summary ?? event.title
+                        summary: summary
                     )
                 )
             }
@@ -260,22 +271,24 @@ final class StatusStore {
             // 一轮工具调用结束，清除可能未收到 postToolUse 的残留
             clearRunningTools(for: conversationId)
             clearRunningSubagents(for: conversationId)
-            addRecent(
-                TaskItem(
-                    id: "response-\(conversationId)-\(Int(now.timeIntervalSince1970))",
-                    category: .recent,
-                    kind: .response,
-                    title: "Agent 已回复",
-                    subtitle: "等待你的下一步",
-                    conversationId: event.conversationId,
-                    workspace: event.workspace,
-                    transcriptPath: event.transcriptPath,
-                    startedAt: now,
-                    updatedAt: now,
-                    expiresAt: now.addingTimeInterval(recentTTL),
-                    summary: event.summary ?? event.title
+            if let summary = normalizedRecentText(event.summary ?? event.title) {
+                addRecent(
+                    TaskItem(
+                        id: "response-\(conversationId)-\(Int(now.timeIntervalSince1970))",
+                        category: .recent,
+                        kind: .response,
+                        title: summary,
+                        subtitle: nil,
+                        conversationId: event.conversationId,
+                        workspace: event.workspace,
+                        transcriptPath: event.transcriptPath,
+                        startedAt: now,
+                        updatedAt: now,
+                        expiresAt: now.addingTimeInterval(recentTTL),
+                        summary: summary
+                    )
                 )
-            )
+            }
 
         case "stop":
             clearRunningTools(for: conversationId)
@@ -285,6 +298,7 @@ final class StatusStore {
             if event.status == "completed" || event.status == "aborted" {
                 sessions.removeValue(forKey: conversationId)
                 conversationHeadlines.removeValue(forKey: conversationId)
+                agentNames.removeValue(forKey: conversationId)
             }
             if event.status == "completed" {
                 addRecent(
@@ -292,7 +306,7 @@ final class StatusStore {
                         id: "stop-\(conversationId)-\(Int(now.timeIntervalSince1970))",
                         category: .recent,
                         kind: .stop,
-                        title: "Agent 任务完成",
+                        title: "",
                         subtitle: event.workspace,
                         conversationId: event.conversationId,
                         workspace: event.workspace,
@@ -330,6 +344,7 @@ final class StatusStore {
         if changed {
             revision += 1
         }
+        ComposerNameResolver.shared.refreshIfNeeded()
     }
 
     private func promoteAwaitingInput() {
@@ -375,12 +390,21 @@ final class StatusStore {
         keys.forEach { pendingShellMCP.removeValue(forKey: $0) }
     }
 
-    private func addRecent(from item: TaskItem, title: String, summary: String? = nil, at date: Date, status: String? = nil) {
+    private func normalizedRecentText(_ text: String?) -> String? {
+        guard let text else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return truncated(trimmed, limit: 200)
+    }
+
+    private func addRecent(from item: TaskItem, summary: String?, at date: Date, status: String? = nil) {
+        guard let text = normalizedRecentText(summary) else { return }
+        let title = status == "error" ? "失败: \(text)" : text
         let final = TaskItem(
             id: "recent-\(item.id)-\(Int(date.timeIntervalSince1970))",
             category: .recent,
             kind: item.kind,
-            title: status == "error" ? "失败: \(title)" : title,
+            title: title,
             subtitle: item.subtitle,
             conversationId: item.conversationId,
             workspace: item.workspace,
@@ -388,14 +412,34 @@ final class StatusStore {
             startedAt: item.startedAt,
             updatedAt: date,
             expiresAt: date.addingTimeInterval(recentTTL),
-            summary: summary ?? item.summary
+            summary: text
         )
         addRecent(final)
     }
 
     private func addRecent(_ item: TaskItem) {
-        recent.removeAll { $0.id == item.id }
-        recent.insert(item, at: 0)
+        guard let text = normalizedRecentText(item.summary ?? (item.title.isEmpty ? nil : item.title)) else {
+            return
+        }
+        var entry = item
+        if entry.title.isEmpty || entry.title != text {
+            entry = TaskItem(
+                id: item.id,
+                category: item.category,
+                kind: item.kind,
+                title: text,
+                subtitle: item.subtitle,
+                conversationId: item.conversationId,
+                workspace: item.workspace,
+                transcriptPath: item.transcriptPath,
+                startedAt: item.startedAt,
+                updatedAt: item.updatedAt,
+                expiresAt: item.expiresAt,
+                summary: text
+            )
+        }
+        recent.removeAll { $0.id == entry.id }
+        recent.insert(entry, at: 0)
         if recent.count > 50 {
             recent = Array(recent.prefix(50))
         }
@@ -488,6 +532,55 @@ final class StatusStore {
     func sessionHeadline(for conversationId: String?) -> String? {
         guard let conversationId else { return nil }
         return conversationHeadlines[conversationId]
+    }
+
+    func agentDisplayName(for conversationId: String) -> String {
+        if let name = ComposerNameResolver.shared.name(for: conversationId), !name.isEmpty {
+            return name
+        }
+        if let name = agentNames[conversationId], !name.isEmpty {
+            return name
+        }
+        if let headline = sessionHeadline(for: conversationId) {
+            return truncateHeadline(headline, limit: 36)
+        }
+        if let workspace = (running + pending).first(where: { $0.conversationId == conversationId })?.workspace {
+            return (workspace as NSString).lastPathComponent
+        }
+        return "Agent"
+    }
+
+    private func registerAgentName(from event: AgentEvent, conversationId: String) {
+        let name = agentName(from: event)
+        if !name.isEmpty {
+            agentNames[conversationId] = name
+        }
+    }
+
+    private func agentName(from event: AgentEvent) -> String {
+        if event.isBackgroundAgent == true { return "Background Agent" }
+        if let mode = event.composerMode, !mode.isEmpty {
+            return displayComposerMode(mode)
+        }
+        if let workspace = event.workspace, !workspace.isEmpty {
+            return (workspace as NSString).lastPathComponent
+        }
+        return "Agent"
+    }
+
+    private func displayComposerMode(_ mode: String) -> String {
+        switch mode.lowercased() {
+        case "agent": return "Agent"
+        case "chat": return "Chat"
+        case "edit": return "Edit"
+        default: return mode.prefix(1).uppercased() + mode.dropFirst()
+        }
+    }
+
+    private func truncateHeadline(_ text: String, limit: Int) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > limit else { return trimmed }
+        return String(trimmed.prefix(limit)) + "…"
     }
 
     func openTranscript(for item: TaskItem) {
