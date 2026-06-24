@@ -462,6 +462,14 @@ final class StatusStore {
         NSWorkspace.shared.launchApplication("Cursor")
     }
 
+    var canStopAgent: Bool {
+        activeCount > 0
+    }
+
+    func stopActiveAgent() {
+        CursorControl.cancelGeneration()
+    }
+
     func openTranscript(for item: TaskItem) {
         guard let path = item.transcriptPath else {
             openCursor()

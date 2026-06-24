@@ -39,8 +39,6 @@ final class FloatingPanelController: NSObject {
             hosting.layer?.backgroundColor = NSColor.clear.cgColor
             panel?.contentView = hosting
             hostingView = hosting
-        } else {
-            hostingView?.rootView = FloatingPanelView(store: store)
         }
 
         if !hasPlacedInitially {

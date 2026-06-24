@@ -3,7 +3,7 @@ import SwiftUI
 @main
 struct CursorAgentStatusApp: App {
     @State private var store = StatusStore()
-    @State private var isFloatingPanelVisible = false
+    @AppStorage("showFloatingPanel") private var showFloatingPanel = true
     @State private var autoHideWhenIdle = false
 
     private let tailer = EventTailer()
@@ -13,12 +13,15 @@ struct CursorAgentStatusApp: App {
         MenuBarExtra {
             MenuBarView(
                 store: store,
-                isFloatingPanelVisible: $isFloatingPanelVisible
+                showFloatingPanel: $showFloatingPanel
             )
             .onAppear {
                 setupEventPipeline()
+                if showFloatingPanel {
+                    panelController.show(store: store)
+                }
             }
-            .onChange(of: isFloatingPanelVisible) { _, visible in
+            .onChange(of: showFloatingPanel) { _, visible in
                 if visible {
                     panelController.show(store: store)
                 } else {

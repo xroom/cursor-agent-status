@@ -3,7 +3,7 @@ import AppKit
 
 struct MenuBarView: View {
     @Bindable var store: StatusStore
-    @Binding var isFloatingPanelVisible: Bool
+    @Binding var showFloatingPanel: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -51,11 +51,16 @@ struct MenuBarView: View {
 
             Divider()
 
+            Toggle(isOn: $showFloatingPanel) {
+                Text("显示悬浮窗")
+                    .font(.system(size: 12))
+            }
+            .toggleStyle(.switch)
+
+            Divider()
+
             HStack(spacing: 12) {
                 Button("Cursor") { store.openCursor() }
-                Button(isFloatingPanelVisible ? "隐藏窗" : "悬浮窗") {
-                    isFloatingPanelVisible.toggle()
-                }
                 Button("重置") { store.resetActiveState() }
                 Spacer()
                 Button("退出") { NSApplication.shared.terminate(nil) }

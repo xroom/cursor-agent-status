@@ -22,6 +22,10 @@ struct FloatingPanelView: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .layoutPriority(1)
+
+            if store.canStopAgent {
+                stopButton
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -39,5 +43,20 @@ struct FloatingPanelView: View {
             return item.relativeTime
         }
         return "—"
+    }
+
+    private var stopButton: some View {
+        Button(action: { store.stopActiveAgent() }) {
+            Image(systemName: "stop.fill")
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 16, height: 16)
+                .background(
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(Color.red.opacity(0.88))
+                )
+        }
+        .buttonStyle(.plain)
+        .help("停止 Agent (⌘⇧⌫)")
     }
 }
