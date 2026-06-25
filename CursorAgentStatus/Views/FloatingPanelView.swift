@@ -18,42 +18,47 @@ struct FloatingPanelView: View {
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 8) {
-            ProStatusTag(code: statusCode)
-                .layoutPriority(2)
+        ZStack(alignment: .topTrailing) {
+            HStack(alignment: .center, spacing: 8) {
+                ProStatusTag(code: statusCode)
+                    .layoutPriority(2)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(content.agentName)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-
-                HStack(spacing: 4) {
-                    Text(content.statusLine)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(content.agentName)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.primary)
                         .lineLimit(1)
                         .truncationMode(.tail)
 
-                    if content.showsStepTimer, let start = content.stepStartedAt {
-                        Text(StepElapsedFormatter.format(since: start, now: tick))
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.tertiary)
-                            .fixedSize(horizontal: true, vertical: false)
-                            .layoutPriority(2)
+                    HStack(spacing: 4) {
+                        Text(content.statusLine)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+
+                        if content.showsStepTimer, let start = content.stepStartedAt {
+                            Text(StepElapsedFormatter.format(since: start, now: tick))
+                                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                .foregroundStyle(.tertiary)
+                                .fixedSize(horizontal: true, vertical: false)
+                                .layoutPriority(2)
+                        }
                     }
                 }
+                .layoutPriority(1)
             }
-            .layoutPriority(1)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .padding(.top, conversationId == nil ? 0 : 4)
+            .padding(.trailing, conversationId == nil ? 0 : 12)
 
-            if content.canStop {
-                stopButton
-                    .layoutPriority(2)
+            if let conversationId {
+                closeButton(conversationId: conversationId)
+                    .padding(.top, 2)
+                    .padding(.trailing, 2)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
         .frame(maxWidth: FloatingPanelLayout.maxWidth, alignment: .leading)
         .fixedSize(horizontal: true, vertical: false)
         .background { ProCardBackground(cornerRadius: 8) }
@@ -62,19 +67,21 @@ struct FloatingPanelView: View {
         }
     }
 
-    private var stopButton: some View {
-        Button(action: { store.stopActiveAgent() }) {
-            Image(systemName: "stop.fill")
-                .font(.system(size: 8, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 16, height: 16)
+    private func closeButton(conversationId: String) -> some View {
+        Button {
+            store.dismissFloatingHUD(for: conversationId)
+        } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 7, weight: .bold))
+                .foregroundStyle(.secondary)
+                .frame(width: 14, height: 14)
                 .background(
-                    RoundedRectangle(cornerRadius: 3, style: .continuous)
-                        .fill(Color.red.opacity(0.88))
+                    Circle()
+                        .fill(Color.primary.opacity(0.08))
                 )
         }
         .buttonStyle(.plain)
-        .help("停止 Agent (⌘⇧⌫)")
+        .help("关闭悬浮窗")
     }
 }
 

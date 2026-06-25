@@ -49,10 +49,15 @@ enum AppLaunchCoordinator {
             return
         }
 
+        guard !store.visibleFloatingAgents().isEmpty else {
+            panelController.refreshLayout(store: store)
+            return
+        }
+
         // 推迟到下一轮 runloop；执行前再次确认仍有活跃 HUD 会话，避免 stop 后旧的 async show 误触发
         DispatchQueue.main.async {
-            guard !store.activeFloatingAgents().isEmpty else {
-                panelController.hide()
+            guard !store.visibleFloatingAgents().isEmpty else {
+                panelController.refreshLayout(store: store)
                 return
             }
             if panelController.isActive {

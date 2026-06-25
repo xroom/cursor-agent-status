@@ -47,6 +47,8 @@ final class StatusStore {
     private var ongoingConversations: Set<String> = []
     /// 本次 App 启动后应展示 HUD 的会话（由 Agent 开始事件标记，完成后保持直至新任务）
     private var hudSessions: Set<String> = []
+    /// 用户手动关闭 HUD 的会话，直至同会话 beforeSubmitPrompt 再显示
+    private var hudUserDismissedSessions: Set<String> = []
     /// HUD 完成态 summary，不受 recentTTL 影响，直至同会话 beforeSubmitPrompt 清除
     private var hudCompletedSummaries: [String: String] = [:]
     /// 最近一次 Agent 回复正文，stop 无 summary 时用于 HUD 完成态
@@ -137,6 +139,7 @@ final class StatusStore {
         hudThoughtPhase.removeAll()
         ongoingConversations.removeAll()
         hudSessions.removeAll()
+        hudUserDismissedSessions.removeAll()
         hudCompletedSummaries.removeAll()
         lastAgentResponseSummaries.removeAll()
         refreshPublishedLists()
@@ -191,6 +194,7 @@ final class StatusStore {
         switch event.event {
         case "beforeSubmitPrompt":
             hudCompletedSummaries.removeValue(forKey: conversationId)
+            hudUserDismissedSessions.remove(conversationId)
             conversationThoughtRevisions.removeValue(forKey: conversationId)
             cancelHUDThoughtPhaseAdvance(for: conversationId)
             hudThoughtPhase.removeValue(forKey: conversationId)
@@ -712,6 +716,16 @@ final class StatusStore {
 
     func hudCompletedSummary(for conversationId: String) -> String? {
         hudCompletedSummaries[conversationId]
+    }
+
+    func dismissFloatingHUD(for conversationId: String) {
+        guard canTrackHUD(for: conversationId) else { return }
+        hudUserDismissedSessions.insert(conversationId)
+        refreshPublishedLists(notifyHUD: true)
+    }
+
+    func isFloatingHUDDismissed(for conversationId: String) -> Bool {
+        hudUserDismissedSessions.contains(conversationId)
     }
 
     func thoughtRevision(for conversationId: String) -> Int {

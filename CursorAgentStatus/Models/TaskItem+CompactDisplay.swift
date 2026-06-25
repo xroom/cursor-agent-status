@@ -308,6 +308,14 @@ extension StatusStore {
         activeHUDSessionIds.map { floatingContent(for: $0) }
     }
 
+    /// 排除用户临时关闭的会话
+    func visibleFloatingAgents() -> [AgentFloatingContent] {
+        activeFloatingAgents().filter { content in
+            guard let conversationId = content.conversationId else { return true }
+            return !isFloatingHUDDismissed(for: conversationId)
+        }
+    }
+
     func floatingContent(for conversationId: String) -> AgentFloatingContent {
         let agentName = agentDisplayName(for: conversationId)
         let headline = sessionHeadline(for: conversationId)

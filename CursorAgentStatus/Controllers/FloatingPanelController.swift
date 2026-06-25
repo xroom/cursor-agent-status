@@ -172,7 +172,7 @@ final class FloatingPanelController: NSObject {
     }
 
     private func sync(store: StatusStore) {
-        let agents = store.activeFloatingAgents()
+        let agents = store.visibleFloatingAgents()
         let activeIds = Set(agents.map(\.panelId))
         let orderedIds = agents.map(\.panelId)
 
