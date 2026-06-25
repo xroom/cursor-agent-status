@@ -743,6 +743,12 @@ final class StatusStore {
         refreshPublishedLists(notifyHUD: true)
     }
 
+    func promoteFloatingHUDSession(_ conversationId: String) {
+        guard canTrackHUD(for: conversationId) else { return }
+        lastActivityAt[conversationId] = Date()
+        refreshPublishedLists(notifyHUD: true)
+    }
+
     func isFloatingHUDDismissed(for conversationId: String) -> Bool {
         hudUserDismissedSessions.contains(conversationId)
     }

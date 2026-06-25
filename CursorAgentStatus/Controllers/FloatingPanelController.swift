@@ -112,6 +112,7 @@ final class FloatingPanelController: NSObject {
     private var preferredLayoutScreen: NSScreen?
     private var mouseMonitors: [Any] = []
     private var collapseDebounceTimer: Timer?
+    private var isStackAnimating = false
 
     /// 悬浮窗底边与 Dock 可见区域顶部的间距
     private let dockTopMargin: CGFloat = 12
@@ -119,6 +120,8 @@ final class FloatingPanelController: NSObject {
     private let stackPeekStep: CGFloat = 10
     /// 展开时面板之间的间距
     private let snapGap: CGFloat = 8
+    /// 堆叠展开/收起动画时长
+    private let stackAnimationDuration: TimeInterval = 0.26
     /// 拖拽时触发磁吸的距离阈值
     private let snapThreshold: CGFloat = 28
     /// 面板尚未完成 SwiftUI 布局时的兜底尺寸
@@ -139,6 +142,7 @@ final class FloatingPanelController: NSObject {
         stopLayoutTimer()
         stopCollapseMonitoring()
         isStackExpanded = false
+        isStackAnimating = false
         for entry in panels.values {
             entry.panel.delegate = nil
             entry.panel.orderOut(nil)
@@ -170,26 +174,52 @@ final class FloatingPanelController: NSObject {
     }
 
     func handleStackClick(panelId: String) {
-        guard !isStackExpanded, panels.count > 1 else { return }
+        guard !isStackExpanded, panels.count > 1, !isStackAnimating else { return }
         expandStack()
     }
 
     func expandStack() {
-        guard !isStackExpanded, panels.count > 1 else { return }
+        guard !isStackExpanded, panels.count > 1, !isStackAnimating else { return }
         isStackExpanded = true
         updatePanelMovability()
         refreshAllPanelViews()
-        layoutDockedPanels(orderedIds: lastOrderedIds, anchorStackBottom: groupStackBottomY, display: true)
-        startCollapseMonitoring()
+        layoutDockedPanels(
+            orderedIds: lastOrderedIds,
+            anchorStackBottom: groupStackBottomY,
+            display: true,
+            animated: true
+        ) { [weak self] in
+            self?.startCollapseMonitoring()
+        }
     }
 
     func collapseStack() {
-        guard isStackExpanded else { return }
+        guard isStackExpanded, !isStackAnimating else { return }
         isStackExpanded = false
         stopCollapseMonitoring()
         updatePanelMovability()
         refreshAllPanelViews()
-        layoutDockedPanels(orderedIds: lastOrderedIds, anchorStackBottom: groupStackBottomY, display: true)
+        layoutDockedPanels(
+            orderedIds: lastOrderedIds,
+            anchorStackBottom: groupStackBottomY,
+            display: true,
+            animated: true
+        )
+    }
+
+    func selectExpandedSession(panelId: String) {
+        guard isStackExpanded, panels.count > 1, !isStackAnimating else { return }
+        promoteSessionToFront(panelId)
+        collapseStack()
+    }
+
+    private func promoteSessionToFront(_ panelId: String) {
+        guard let index = lastOrderedIds.firstIndex(of: panelId), index > 0 else { return }
+        var ids = lastOrderedIds
+        ids.remove(at: index)
+        ids.insert(panelId, at: 0)
+        lastOrderedIds = ids
+        statusStore?.promoteFloatingHUDSession(panelId)
     }
 
     func handlePanelMove(panelId: String, frame: NSRect) {
@@ -297,8 +327,10 @@ final class FloatingPanelController: NSObject {
             conversationId: conversationId,
             stackCount: panels.count,
             isStackCollapsed: !isStackExpanded && panels.count > 1,
+            isStackExpanded: isStackExpanded && panels.count > 1,
             showsStackBadge: !isStackExpanded && panels.count > 1 && stackIndex == 0,
-            onExpandStack: { [weak self] in self?.expandStack() }
+            onExpandStack: { [weak self] in self?.expandStack() },
+            onSelectSession: { [weak self] in self?.selectExpandedSession(panelId: conversationId) }
         )
     }
 
@@ -412,12 +444,20 @@ final class FloatingPanelController: NSObject {
         anchorStackBottom: CGFloat? = nil,
         anchorPanelIndex: Int? = nil,
         anchorY: CGFloat? = nil,
-        display: Bool
+        display: Bool,
+        animated: Bool = false,
+        completion: (() -> Void)? = nil
     ) {
-        guard !orderedIds.isEmpty else { return }
+        guard !orderedIds.isEmpty else {
+            completion?()
+            return
+        }
 
         let entries = orderedIds.compactMap { panels[$0] }
-        guard entries.count == orderedIds.count else { return }
+        guard entries.count == orderedIds.count else {
+            completion?()
+            return
+        }
 
         for entry in entries {
             _ = remeasurePanel(entry)
@@ -464,29 +504,106 @@ final class FloatingPanelController: NSObject {
 
         FloatingPanelPlacement.rememberScreen(screen.placementIdentifier)
 
-        isApplyingLayout = true
-        defer { isApplyingLayout = false }
+        let frames = computePanelFrames(
+            entries: entries,
+            sizes: sizes,
+            collapsed: collapsed,
+            clampedStartBottomY: clampedStartBottomY,
+            visible: visible
+        )
 
+        applyPanelFrames(
+            frames,
+            entries: entries,
+            collapsed: collapsed,
+            display: display,
+            animated: animated && entries.count > 1,
+            completion: completion
+        )
+    }
+
+    private func computePanelFrames(
+        entries: [AgentPanelWindow],
+        sizes: [NSSize],
+        collapsed: Bool,
+        clampedStartBottomY: CGFloat,
+        visible: NSRect
+    ) -> [(AgentPanelWindow, NSRect)] {
         if collapsed {
-            for (index, entry) in entries.enumerated() {
+            return entries.enumerated().map { index, entry in
                 let size = sizes[index]
                 let peekOffset = CGFloat(index) * stackPeekStep
                 let x = centeredX(in: visible, width: size.width)
-                let frame = NSRect(x: x, y: clampedStartBottomY + peekOffset, width: size.width, height: size.height)
+                let frame = NSRect(
+                    x: x,
+                    y: clampedStartBottomY + peekOffset,
+                    width: size.width,
+                    height: size.height
+                )
+                return (entry, frame)
+            }
+        }
+
+        var bottomY = clampedStartBottomY
+        return entries.enumerated().map { index, entry in
+            let size = sizes[index]
+            let x = centeredX(in: visible, width: size.width)
+            let frame = NSRect(x: x, y: bottomY, width: size.width, height: size.height)
+            bottomY += size.height + snapGap
+            return (entry, frame)
+        }
+    }
+
+    private func applyPanelFrames(
+        _ frames: [(AgentPanelWindow, NSRect)],
+        entries: [AgentPanelWindow],
+        collapsed: Bool,
+        display: Bool,
+        animated: Bool,
+        completion: (() -> Void)? = nil
+    ) {
+        isApplyingLayout = true
+
+        let finalize: () -> Void = { [weak self] in
+            guard let self else { return }
+            if collapsed {
+                self.updateCollapsedZOrder(entries)
+            }
+            self.isApplyingLayout = false
+            self.isStackAnimating = false
+            completion?()
+        }
+
+        guard animated else {
+            for (entry, frame) in frames {
                 entry.panel.setFrame(frame, display: display)
             }
-            for index in entries.indices.reversed() {
-                entries[index].panel.orderFrontRegardless()
+            if collapsed {
+                updateCollapsedZOrder(entries)
             }
-        } else {
-            var bottomY = clampedStartBottomY
-            for (index, entry) in entries.enumerated() {
-                let size = sizes[index]
-                let x = centeredX(in: visible, width: size.width)
-                let frame = NSRect(x: x, y: bottomY, width: size.width, height: size.height)
-                entry.panel.setFrame(frame, display: display)
-                bottomY += size.height + snapGap
+            isApplyingLayout = false
+            completion?()
+            return
+        }
+
+        isStackAnimating = true
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = stackAnimationDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            context.allowsImplicitAnimation = true
+            for (entry, frame) in frames {
+                entry.panel.animator().setFrame(frame, display: display)
             }
+        }, completionHandler: {
+            Task { @MainActor in
+                finalize()
+            }
+        })
+    }
+
+    private func updateCollapsedZOrder(_ entries: [AgentPanelWindow]) {
+        for index in entries.indices.reversed() {
+            entries[index].panel.orderFrontRegardless()
         }
     }
 
@@ -687,7 +804,7 @@ final class FloatingPanelController: NSObject {
     }
 
     private func checkCollapseIfMouseOutside() {
-        guard isStackExpanded, panels.count > 1 else { return }
+        guard isStackExpanded, panels.count > 1, !isStackAnimating else { return }
         let mouse = NSEvent.mouseLocation
         let bounds = expandedStackBounds().insetBy(dx: -16, dy: -16)
         guard !bounds.contains(mouse) else { return }

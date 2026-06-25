@@ -5,8 +5,10 @@ struct FloatingPanelView: View {
     let conversationId: String?
     var stackCount: Int = 1
     var isStackCollapsed: Bool = false
+    var isStackExpanded: Bool = false
     var showsStackBadge: Bool = false
     var onExpandStack: (() -> Void)? = nil
+    var onSelectSession: (() -> Void)? = nil
 
     @State private var tick = Date()
 
@@ -60,6 +62,8 @@ struct FloatingPanelView: View {
             .onTapGesture {
                 if isStackCollapsed {
                     onExpandStack?()
+                } else if isStackExpanded {
+                    onSelectSession?()
                 }
             }
 
