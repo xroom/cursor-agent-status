@@ -26,7 +26,10 @@ enum AppLaunchCoordinator {
         }
         tailer.start()
 
-        refreshFloatingPanels(store: store, panelController: panelController)
+        // 悬浮窗创建推迟到下一轮 runloop，避免 SwiftUI Scene 尚未就绪时测量 NSHostingView
+        DispatchQueue.main.async {
+            refreshFloatingPanels(store: store, panelController: panelController)
+        }
     }
 
     static func refreshFloatingPanels(

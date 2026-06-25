@@ -170,8 +170,8 @@ final class FloatingPanelController: NSObject {
 
         let entry = AgentPanelWindow(panelId: panelId, panel: panel, hostingView: hosting)
         panels[panelId] = entry
-        _ = remeasurePanel(entry)
         panel.orderFrontRegardless()
+        _ = remeasurePanel(entry)
     }
 
     private func makePanel(panelId: String) -> NSPanel {
@@ -198,10 +198,10 @@ final class FloatingPanelController: NSObject {
 
     @discardableResult
     private func remeasurePanel(_ entry: AgentPanelWindow) -> Bool {
-        entry.hostingView.layoutSubtreeIfNeeded()
+        guard entry.panel.contentView != nil else { return false }
 
         let fitted = entry.hostingView.fittingSize
-        let clampedWidth = min(fitted.width, FloatingPanelLayout.maxWidth)
+        let clampedWidth = min(max(fitted.width, 1), FloatingPanelLayout.maxWidth)
         let newSize = NSSize(width: clampedWidth, height: max(fitted.height, 48))
 
         let changed =

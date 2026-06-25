@@ -1,44 +1,72 @@
+import AppKit
 import SwiftUI
+
+@MainActor
+enum AppServices {
+    static let store = StatusStore()
+    static let tailer = EventTailer()
+    static let panelController = FloatingPanelController()
+}
+
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        terminateOtherInstances()
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        AppLaunchCoordinator.startIfNeeded(
+            store: AppServices.store,
+            tailer: AppServices.tailer,
+            panelController: AppServices.panelController
+        )
+    }
+
+    /// 菜单栏 App 被多次 open / ⌘R 时会叠加进程；保留当前实例，退出其余副本。
+    private func terminateOtherInstances() {
+        guard let bundleID = Bundle.main.bundleIdentifier else { return }
+        let currentPID = ProcessInfo.processInfo.processIdentifier
+        for app in NSRunningApplication.runningApplications(withBundleIdentifier: bundleID) {
+            guard app.processIdentifier != currentPID else { continue }
+            if !app.forceTerminate() {
+                app.terminate()
+            }
+        }
+    }
+}
 
 @main
 struct CursorAgentStatusApp: App {
-    @StateObject private var appState = AppState()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @AppStorage("showFloatingPanel") private var showFloatingPanel = true
 
     var body: some Scene {
         MenuBarExtra {
             MenuBarView(
-                store: appState.store,
+                store: AppServices.store,
                 showFloatingPanel: $showFloatingPanel
             )
             .onChange(of: showFloatingPanel) { _, visible in
                 AppLaunchCoordinator.setFloatingPanelVisible(
                     visible,
-                    store: appState.store,
-                    panelController: appState.panelController
+                    store: AppServices.store,
+                    panelController: AppServices.panelController
                 )
             }
         } label: {
-            StatusBadgeView(
-                iconName: appState.store.statusIconName,
-                activeCount: appState.store.activeCount
-            )
+            MenuBarIconView(store: AppServices.store)
         }
         .menuBarExtraStyle(.window)
     }
 }
 
-@MainActor
-final class AppState: ObservableObject {
-    let store = StatusStore()
-    let tailer = EventTailer()
-    let panelController = FloatingPanelController()
+private struct MenuBarIconView: View {
+    @Bindable var store: StatusStore
 
-    init() {
-        AppLaunchCoordinator.startIfNeeded(
-            store: store,
-            tailer: tailer,
-            panelController: panelController
+    var body: some View {
+        StatusBadgeView(
+            iconName: store.statusIconName,
+            activeCount: store.activeCount
         )
     }
 }
