@@ -113,6 +113,7 @@ final class FloatingPanelController: NSObject {
     private var mouseMonitors: [Any] = []
     private var collapseDebounceTimer: Timer?
     private var isStackAnimating = false
+    private var panelLastStatusCode: [String: ProStatusCode] = [:]
 
     /// 悬浮窗底边与 Dock 可见区域顶部的间距
     private let dockTopMargin: CGFloat = 12
@@ -151,6 +152,7 @@ final class FloatingPanelController: NSObject {
         panelDelegates.removeAll()
         lastOrderedIds = []
         groupStackBottomY = nil
+        panelLastStatusCode.removeAll()
     }
 
     func toggle(store: StatusStore) {
@@ -219,7 +221,37 @@ final class FloatingPanelController: NSObject {
         ids.remove(at: index)
         ids.insert(panelId, at: 0)
         lastOrderedIds = ids
-        statusStore?.promoteFloatingHUDSession(panelId)
+        statusStore?.bumpHUDSessionActivity(panelId)
+    }
+
+    private func bringSessionToFront(_ panelId: String, orderedIds: inout [String]) {
+        guard let index = orderedIds.firstIndex(of: panelId), index > 0 else { return }
+        orderedIds.remove(at: index)
+        orderedIds.insert(panelId, at: 0)
+    }
+
+    private func promoteSessionsWithStatusChanges(
+        agents: [AgentFloatingContent],
+        store: StatusStore,
+        orderedIds: inout [String]
+    ) -> Bool {
+        let activeIds = Set(agents.map(\.panelId))
+        var promoted = false
+
+        for content in agents {
+            let panelId = content.panelId
+            let code = content.statusCode
+            if let previous = panelLastStatusCode[panelId], previous != code {
+                bringSessionToFront(panelId, orderedIds: &orderedIds)
+                store.bumpHUDSessionActivity(panelId)
+                panels[panelId]?.panel.orderFrontRegardless()
+                promoted = true
+            }
+            panelLastStatusCode[panelId] = code
+        }
+
+        panelLastStatusCode = panelLastStatusCode.filter { activeIds.contains($0.key) }
+        return promoted
     }
 
     func handlePanelMove(panelId: String, frame: NSRect) {
@@ -259,7 +291,6 @@ final class FloatingPanelController: NSObject {
         statusStore = store
         let agents = store.visibleFloatingAgents()
         let activeIds = Set(agents.map(\.panelId))
-        let orderedIds = agents.map(\.panelId)
 
         for id in panels.keys where !activeIds.contains(id) {
             panels[id]?.panel.delegate = nil
@@ -281,27 +312,42 @@ final class FloatingPanelController: NSObject {
             panelDelegates.removeAll()
             lastOrderedIds = []
             groupStackBottomY = nil
+            panelLastStatusCode.removeAll()
         } else {
+            var orderedIds = agents.map(\.panelId)
+            let promotedByStatusChange = promoteSessionsWithStatusChanges(
+                agents: agents,
+                store: store,
+                orderedIds: &orderedIds
+            )
             lastOrderedIds = orderedIds
             if panels.count <= 1 {
                 isStackExpanded = false
                 stopCollapseMonitoring()
             }
+            let shouldAnimateLayout = promotedByStatusChange && !isStackExpanded && panels.count > 1
             if hadMultipleBefore, panels.count > 1, let stackBottomBefore {
                 layoutDockedPanels(
                     orderedIds: orderedIds,
                     anchorStackBottom: stackBottomBefore,
-                    display: true
+                    display: true,
+                    animated: shouldAnimateLayout
                 )
             } else if FloatingPanelPlacement.isUserAdjusted,
                       let savedY = FloatingPanelPlacement.savedBaselineY {
                 layoutDockedPanels(
                     orderedIds: orderedIds,
                     anchorStackBottom: savedY,
-                    display: true
+                    display: true,
+                    animated: shouldAnimateLayout
                 )
             } else {
-                layoutDockedPanels(orderedIds: orderedIds, snapToDock: true, display: true)
+                layoutDockedPanels(
+                    orderedIds: orderedIds,
+                    snapToDock: true,
+                    display: true,
+                    animated: shouldAnimateLayout
+                )
             }
             updatePanelMovability()
             refreshAllPanelViews()
