@@ -1,6 +1,51 @@
 import AppKit
 import SwiftUI
 
+private extension NSScreen {
+    var placementIdentifier: String {
+        if let number = deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber {
+            return "screen-\(number.intValue)"
+        }
+        return String(format: "frame-%.0f-%.0f", frame.origin.x, frame.origin.y)
+    }
+}
+
+private enum FloatingPanelPlacement {
+    private static let screenIdKey = "floatingPanelScreenId"
+    private static let anchorLeftKey = "floatingPanelAnchorLeft"
+    private static let baselineYKey = "floatingPanelBaselineY"
+    private static let userAdjustedKey = "floatingPanelUserAdjusted"
+
+    static var savedScreenId: String? {
+        UserDefaults.standard.string(forKey: screenIdKey)
+    }
+
+    static var isUserAdjusted: Bool {
+        UserDefaults.standard.bool(forKey: userAdjustedKey)
+    }
+
+    static var savedAnchorLeft: CGFloat? {
+        guard UserDefaults.standard.object(forKey: anchorLeftKey) != nil else { return nil }
+        return CGFloat(UserDefaults.standard.double(forKey: anchorLeftKey))
+    }
+
+    static var savedBaselineY: CGFloat? {
+        guard UserDefaults.standard.object(forKey: baselineYKey) != nil else { return nil }
+        return CGFloat(UserDefaults.standard.double(forKey: baselineYKey))
+    }
+
+    static func rememberScreen(_ screenId: String) {
+        UserDefaults.standard.set(screenId, forKey: screenIdKey)
+    }
+
+    static func saveUserPlacement(screenId: String, anchorLeft: CGFloat, baselineY: CGFloat) {
+        UserDefaults.standard.set(screenId, forKey: screenIdKey)
+        UserDefaults.standard.set(Double(anchorLeft), forKey: anchorLeftKey)
+        UserDefaults.standard.set(Double(baselineY), forKey: baselineYKey)
+        UserDefaults.standard.set(true, forKey: userAdjustedKey)
+    }
+}
+
 private final class AgentPanelWindow {
     let panelId: String
     let panel: NSPanel
@@ -39,6 +84,7 @@ final class FloatingPanelController: NSObject {
     private var groupBaselineY: CGFloat?
     private var isApplyingLayout = false
     private var layoutTimer: Timer?
+    private var preferredLayoutScreen: NSScreen?
 
     /// 悬浮窗底边与 Dock 可见区域顶部的间距
     private let dockTopMargin: CGFloat = 12
@@ -93,17 +139,36 @@ final class FloatingPanelController: NSObject {
     }
 
     func handlePanelMove(panelId: String, frame: NSRect) {
-        guard !isApplyingLayout, panels.count > 1 else { return }
+        guard !isApplyingLayout else { return }
         guard let index = lastOrderedIds.firstIndex(of: panelId) else { return }
 
-        let snapped = snapMovedFrame(frame, movedIndex: index, orderedIds: lastOrderedIds)
-        layoutDockedPanels(
-            orderedIds: lastOrderedIds,
-            baselineY: snapped.origin.y,
-            anchorPanelIndex: index,
-            anchorX: snapped.origin.x,
-            display: true
-        )
+        if panels.count > 1 {
+            let snapped = snapMovedFrame(frame, movedIndex: index, orderedIds: lastOrderedIds)
+            preferredLayoutScreen = screenContaining(point: frame.origin)
+            layoutDockedPanels(
+                orderedIds: lastOrderedIds,
+                anchorPanelIndex: index,
+                anchorX: snapped.origin.x,
+                display: true
+            )
+            preferredLayoutScreen = nil
+            persistUserPlacement(for: snapped)
+            return
+        }
+
+        let screen = screenContaining(point: frame.origin) ?? resolvedLayoutScreen()
+        let visible = screen.visibleFrame
+        var snapped = frame
+        snapped.origin.y = dockBaselineY(in: visible)
+        snapped.origin.x = centeredAnchorLeft(in: visible, totalWidth: snapped.width)
+        groupBaselineY = snapped.origin.y
+        groupAnchorLeft = snapped.origin.x
+
+        isApplyingLayout = true
+        panels[panelId]?.panel.setFrame(snapped, display: true)
+        isApplyingLayout = false
+
+        persistUserPlacement(for: snapped)
     }
 
     private func sync(store: StatusStore) {
@@ -138,11 +203,10 @@ final class FloatingPanelController: NSObject {
                 layoutDockedPanels(
                     orderedIds: orderedIds,
                     anchorLeft: anchorBefore,
-                    baselineY: groupBaselineY,
                     display: true
                 )
             } else {
-                layoutDockedPanels(orderedIds: orderedIds, centerOnScreen: true, display: true)
+                layoutDockedPanels(orderedIds: orderedIds, snapToDockCenter: true, display: true)
             }
             scheduleDeferredRelayout()
         }
@@ -238,9 +302,8 @@ final class FloatingPanelController: NSObject {
 
     private func layoutDockedPanels(
         orderedIds: [String],
-        centerOnScreen: Bool = false,
+        snapToDockCenter: Bool = false,
         anchorLeft: CGFloat? = nil,
-        baselineY: CGFloat? = nil,
         anchorPanelIndex: Int? = nil,
         anchorX: CGFloat? = nil,
         display: Bool
@@ -258,11 +321,9 @@ final class FloatingPanelController: NSObject {
         let gap = snapGap * CGFloat(max(entries.count - 1, 0))
         let totalWidth = sizes.map(\.width).reduce(0, +) + gap
 
-        let screen = NSScreen.main ?? NSScreen.screens.first
-        guard let screen else { return }
+        let screen = resolvedLayoutScreen(for: entries.map(\.panel.frame))
         let visible = screen.visibleFrame
-
-        let y = baselineY ?? groupBaselineY ?? (visible.minY + dockTopMargin)
+        let y = dockBaselineY(in: visible)
         groupBaselineY = y
 
         let startX: CGFloat
@@ -274,18 +335,21 @@ final class FloatingPanelController: NSObject {
             startX = left
         } else if let anchorLeft {
             startX = anchorLeft
-        } else if centerOnScreen || groupAnchorLeft == nil {
-            startX = visible.midX - totalWidth / 2
+        } else if snapToDockCenter || groupAnchorLeft == nil {
+            startX = centeredAnchorLeft(in: visible, totalWidth: totalWidth)
         } else {
-            startX = groupAnchorLeft ?? (visible.midX - totalWidth / 2)
+            startX = groupAnchorLeft ?? centeredAnchorLeft(in: visible, totalWidth: totalWidth)
         }
 
-        groupAnchorLeft = startX
+        let clampedStartX = min(max(startX, visible.minX), max(visible.minX, visible.maxX - totalWidth))
+        groupAnchorLeft = clampedStartX
+
+        FloatingPanelPlacement.rememberScreen(screen.placementIdentifier)
 
         isApplyingLayout = true
         defer { isApplyingLayout = false }
 
-        var x = startX
+        var x = clampedStartX
         for (index, entry) in entries.enumerated() {
             let size = sizes[index]
             let frame = NSRect(x: x, y: y, width: size.width, height: size.height)
@@ -294,15 +358,39 @@ final class FloatingPanelController: NSObject {
         }
     }
 
+    /// Dock 可见区域上方、面板底边的 Y 坐标
+    private func dockBaselineY(in visible: NSRect) -> CGFloat {
+        visible.minY + dockTopMargin
+    }
+
+    /// 面板组在 Dock 上方水平居中时的左边缘 X
+    private func centeredAnchorLeft(in visible: NSRect, totalWidth: CGFloat) -> CGFloat {
+        min(max(visible.midX - totalWidth / 2, visible.minX), max(visible.minX, visible.maxX - totalWidth))
+    }
+
     private func snapMovedFrame(_ frame: NSRect, movedIndex: Int, orderedIds: [String]) -> NSRect {
         let entries = orderedIds.compactMap { panels[$0] }
         guard movedIndex < entries.count else { return frame }
 
         let sizes = panelSizes(for: entries)
-        let screen = NSScreen.main ?? NSScreen.screens.first
-        let defaultY = screen.map { $0.visibleFrame.minY + dockTopMargin } ?? frame.origin.y
+        let screen = screenContaining(point: frame.origin) ?? resolvedLayoutScreen(for: [frame])
+        let visible = screen.visibleFrame
         var snapped = frame
-        snapped.origin.y = groupBaselineY ?? defaultY
+        snapped.origin.y = dockBaselineY(in: visible)
+
+        let totalWidth = sizes.map(\.width).reduce(0, +) + snapGap * CGFloat(max(entries.count - 1, 0))
+        let centeredLeft = centeredAnchorLeft(in: visible, totalWidth: totalWidth)
+        var groupLeft = snapped.origin.x
+        for i in 0..<movedIndex {
+            groupLeft -= snapGap + sizes[i].width
+        }
+        if abs(groupLeft - centeredLeft) <= snapThreshold {
+            var alignedLeft = centeredLeft
+            for i in 0..<movedIndex {
+                alignedLeft += snapGap + sizes[i].width
+            }
+            snapped.origin.x = alignedLeft
+        }
 
         guard entries.count > 1 else { return snapped }
 
@@ -354,7 +442,6 @@ final class FloatingPanelController: NSObject {
         layoutDockedPanels(
             orderedIds: lastOrderedIds,
             anchorLeft: groupAnchorLeft,
-            baselineY: groupBaselineY,
             display: true
         )
     }
@@ -374,9 +461,46 @@ final class FloatingPanelController: NSObject {
             self.layoutDockedPanels(
                 orderedIds: self.lastOrderedIds,
                 anchorLeft: self.groupAnchorLeft,
-                baselineY: self.groupBaselineY,
                 display: true
             )
         }
+    }
+
+    private func resolvedLayoutScreen(for frames: [NSRect] = []) -> NSScreen {
+        if let preferredLayoutScreen {
+            return preferredLayoutScreen
+        }
+
+        for frame in frames {
+            if let screen = screenContaining(point: frame.origin) {
+                return screen
+            }
+        }
+
+        if let savedId = FloatingPanelPlacement.savedScreenId,
+           let screen = NSScreen.screens.first(where: { $0.placementIdentifier == savedId }) {
+            return screen
+        }
+
+        let mouse = NSEvent.mouseLocation
+        if let screen = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) {
+            return screen
+        }
+
+        return NSScreen.main ?? NSScreen.screens[0]
+    }
+
+    private func screenContaining(point: NSPoint) -> NSScreen? {
+        NSScreen.screens.first { $0.frame.contains(point) }
+    }
+
+    private func persistUserPlacement(for frame: NSRect) {
+        guard let anchorLeft = groupAnchorLeft, let baselineY = groupBaselineY else { return }
+        let screen = screenContaining(point: frame.origin) ?? resolvedLayoutScreen(for: [frame])
+        FloatingPanelPlacement.saveUserPlacement(
+            screenId: screen.placementIdentifier,
+            anchorLeft: anchorLeft,
+            baselineY: baselineY
+        )
     }
 }
