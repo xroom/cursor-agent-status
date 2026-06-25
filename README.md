@@ -10,6 +10,8 @@ macOS 菜单栏应用，通过 [Cursor Hooks](https://cursor.com/docs/agent/hook
 
 ## 截图
 
+![概览](assets/cursor%20agent%20status%20封面%201.png)
+
 ### 菜单栏下拉面板
 
 ![菜单栏下拉面板](assets/软件设置界面.png)
@@ -27,6 +29,13 @@ macOS 菜单栏应用，通过 [Cursor Hooks](https://cursor.com/docs/agent/hook
 - 第二行：**当前状态** + **步骤耗时**（如 `12秒`）
 - 有进行中任务时显示停止按钮（发送 ⌘⇧⌫ 到 Cursor）
 - 默认 Dock 上方水平居中，可拖动
+
+#### 任务完成（DONE）
+
+![悬浮 HUD 完成态](assets/悬浮窗-任务完成.png)
+
+- 完成态显示 Hook 返回的 `summary`，不显示固定文案
+- `DONE` 标签保留约 60 秒后自动淡出
 
 ---
 
