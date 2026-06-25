@@ -18,6 +18,7 @@ final class EventTailer {
         ensureStatusDirectory()
         ensureEventsFile()
         openReadHandle()
+        // 仅从启动时刻的日志末尾开始 tail，忽略历史事件
         offset = currentFileSize()
 
         startFileWatcher()
@@ -36,6 +37,7 @@ final class EventTailer {
         readHandle = nil
     }
 
+    /// 供调试/测试读取完整日志；正常启动流程不使用。
     func replayAllEvents() -> [AgentEvent] {
         guard FileManager.default.fileExists(atPath: Self.eventsFile.path),
               let data = try? Data(contentsOf: Self.eventsFile),

@@ -14,7 +14,9 @@ enum AppLaunchCoordinator {
         guard !didStart else { return }
         didStart = true
 
-        store.bootstrap(from: tailer)
+        store.prepareForLiveEvents()
+        panelController.hide()
+
         store.onStateChange = {
             refreshFloatingPanels(store: store, panelController: panelController)
         }
@@ -24,12 +26,8 @@ enum AppLaunchCoordinator {
                 store.handle(event)
             }
         }
-        tailer.start()
 
-        // 悬浮窗创建推迟到下一轮 runloop，避免 SwiftUI Scene 尚未就绪时测量 NSHostingView
-        DispatchQueue.main.async {
-            refreshFloatingPanels(store: store, panelController: panelController)
-        }
+        tailer.start()
     }
 
     static func refreshFloatingPanels(
@@ -37,12 +35,27 @@ enum AppLaunchCoordinator {
         panelController: FloatingPanelController
     ) {
         let showFloatingPanel = UserDefaults.standard.object(forKey: "showFloatingPanel") as? Bool ?? true
-        guard showFloatingPanel else { return }
+        guard showFloatingPanel else {
+            panelController.hide()
+            return
+        }
 
-        if panelController.isActive {
-            panelController.refreshLayout(store: store)
-        } else {
-            panelController.show(store: store)
+        guard !store.activeFloatingAgents().isEmpty else {
+            panelController.hide()
+            return
+        }
+
+        // 推迟到下一轮 runloop；执行前再次确认仍有活跃 HUD 会话，避免 stop 后旧的 async show 误触发
+        DispatchQueue.main.async {
+            guard !store.activeFloatingAgents().isEmpty else {
+                panelController.hide()
+                return
+            }
+            if panelController.isActive {
+                panelController.refreshLayout(store: store)
+            } else {
+                panelController.show(store: store)
+            }
         }
     }
 

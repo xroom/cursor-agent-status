@@ -39,6 +39,8 @@ final class StatusStore {
     private var conversationThoughts: [String: String] = [:]
     /// 尚未 sessionEnd 的会话（stop 仅表示单轮结束，不代表会话关闭）
     private var ongoingConversations: Set<String> = []
+    /// 本次 App 启动后应展示 HUD 的会话（由 Agent 开始事件标记，stop/sessionEnd 清除）
+    private var hudSessions: Set<String> = []
     private var pruneTimer: Timer?
 
     var activeCount: Int {
@@ -64,12 +66,9 @@ final class StatusStore {
         startPruneTimer()
     }
 
-    func bootstrap(from tailer: EventTailer) {
-        for event in tailer.replayAllEvents() {
-            apply(event)
-        }
-        pruneStaleRunning(now: Date())
-        refreshPublishedLists()
+    /// 启动后只消费新事件，不恢复历史任务状态与悬浮窗。
+    func prepareForLiveEvents() {
+        resetActiveState()
     }
 
     func handle(_ event: AgentEvent) {
@@ -89,13 +88,59 @@ final class StatusStore {
         agentNames.removeAll()
         conversationThoughts.removeAll()
         ongoingConversations.removeAll()
+        hudSessions.removeAll()
         refreshPublishedLists()
     }
 
+    /// 本次启动后应显示 HUD 的会话 ID
+    var activeHUDSessionIds: [String] {
+        hudSessions.sorted {
+            (lastActivityAt[$0] ?? .distantPast) > (lastActivityAt[$1] ?? .distantPast)
+        }
+    }
+
+    private func resolvedConversationId(for event: AgentEvent) -> String {
+        if let id = event.conversationId, !id.isEmpty, id != "unknown" {
+            return id
+        }
+        if let id = event.generationId, !id.isEmpty {
+            return id
+        }
+        return "unknown"
+    }
+
+    private func canTrackHUD(for conversationId: String) -> Bool {
+        conversationId != "unknown" && conversationId.count >= 8
+    }
+
+    private func markHUDSession(_ conversationId: String) {
+        guard canTrackHUD(for: conversationId) else { return }
+        hudSessions.insert(conversationId)
+    }
+
+    private func clearHUDSession(_ conversationId: String) {
+        hudSessions.remove(conversationId)
+    }
+
+    private func isAgentStartEvent(_ name: String) -> Bool {
+        switch name {
+        case "beforeSubmitPrompt", "sessionStart", "preToolUse", "subagentStart", "afterAgentThought":
+            return true
+        default:
+            return false
+        }
+    }
+
     private func apply(_ event: AgentEvent) {
-        let conversationId = event.conversationId ?? "unknown"
+        let conversationId = resolvedConversationId(for: event)
+        guard canTrackHUD(for: conversationId) else { return }
+
         let now = event.date
         lastActivityAt[conversationId] = now
+
+        if isAgentStartEvent(event.event) {
+            markHUDSession(conversationId)
+        }
 
         switch event.event {
         case "beforeSubmitPrompt":
@@ -162,6 +207,7 @@ final class StatusStore {
             lastResponseAt.removeValue(forKey: conversationId)
 
         case "sessionEnd":
+            clearHUDSession(conversationId)
             ongoingConversations.remove(conversationId)
             conversationHeadlines.removeValue(forKey: conversationId)
             agentNames.removeValue(forKey: conversationId)
@@ -307,6 +353,7 @@ final class StatusStore {
             }
 
         case "stop":
+            clearHUDSession(conversationId)
             clearRunningTools(for: conversationId)
             clearRunningSubagents(for: conversationId)
             clearPending(for: conversationId)
@@ -509,6 +556,10 @@ final class StatusStore {
             }
         }
         ongoingConversations = ongoingConversations.filter { conversationId in
+            guard let last = lastActivityAt[conversationId] else { return false }
+            return now.timeIntervalSince(last) < staleSessionTTL
+        }
+        hudSessions = hudSessions.filter { conversationId in
             guard let last = lastActivityAt[conversationId] else { return false }
             return now.timeIntervalSince(last) < staleSessionTTL
         }

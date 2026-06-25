@@ -247,26 +247,13 @@ extension StatusStore {
         running.sorted { $0.updatedAt > $1.updatedAt }
     }
 
-    /// 每个活跃 Agent（会话）对应一个悬浮窗
+    /// 每个应展示 HUD 的 Agent（会话）；仅包含本次 App 启动后触发了 Agent 开始事件的会话
     func activeFloatingAgents() -> [AgentFloatingContent] {
-        var conversationIds = Set<String>()
-        for item in running + pending {
-            guard let id = item.conversationId, isTrackableConversationId(id) else { continue }
-            conversationIds.insert(id)
-        }
-        for id in ongoingConversationIdList() {
-            guard isTrackableConversationId(id) else { continue }
-            conversationIds.insert(id)
-        }
-
-        return conversationIds
-            .sorted { latestActivity(for: $0) > latestActivity(for: $1) }
-            .map { floatingContent(for: $0) }
+        activeHUDSessionIds.map { floatingContent(for: $0) }
     }
 
     private func isTrackableConversationId(_ id: String) -> Bool {
-        let pattern = #"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"#
-        return id.range(of: pattern, options: .regularExpression) != nil
+        id != "unknown" && id.count >= 8
     }
 
     func floatingContent(for conversationId: String) -> AgentFloatingContent {
