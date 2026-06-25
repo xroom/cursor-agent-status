@@ -51,6 +51,8 @@ final class StatusStore {
     private var hudUserDismissedSessions: Set<String> = []
     /// HUD 完成态 summary，不受 recentTTL 影响，直至同会话 beforeSubmitPrompt 清除
     private var hudCompletedSummaries: [String: String] = [:]
+    /// HUD 完成态为手动停止（stop/sessionEnd aborted）
+    private var hudStoppedSessions: Set<String> = []
     /// 最近一次 Agent 回复正文，stop 无 summary 时用于 HUD 完成态
     private var lastAgentResponseSummaries: [String: String] = [:]
     private var pruneTimer: Timer?
@@ -112,6 +114,7 @@ final class StatusStore {
         }
 
         hudCompletedSummaries = hudCompletedSummaries.filter { hudSessions.contains($0.key) }
+        hudStoppedSessions = hudStoppedSessions.filter { hudSessions.contains($0) }
         lastAgentResponseSummaries = lastAgentResponseSummaries.filter { hudSessions.contains($0.key) }
         conversationHeadlines = conversationHeadlines.filter { hudSessions.contains($0.key) }
         conversationThoughts = conversationThoughts.filter { hudSessions.contains($0.key) }
@@ -141,6 +144,7 @@ final class StatusStore {
         hudSessions.removeAll()
         hudUserDismissedSessions.removeAll()
         hudCompletedSummaries.removeAll()
+        hudStoppedSessions.removeAll()
         lastAgentResponseSummaries.removeAll()
         refreshPublishedLists()
     }
@@ -194,6 +198,7 @@ final class StatusStore {
         switch event.event {
         case "beforeSubmitPrompt":
             hudCompletedSummaries.removeValue(forKey: conversationId)
+            hudStoppedSessions.remove(conversationId)
             hudUserDismissedSessions.remove(conversationId)
             conversationThoughtRevisions.removeValue(forKey: conversationId)
             cancelHUDThoughtPhaseAdvance(for: conversationId)
@@ -288,17 +293,21 @@ final class StatusStore {
                         at: now
                     )
                 } else if event.status == "aborted" {
-                    markHUDCompleted(
+                    markHUDStopped(
                         conversationId: conversationId,
-                        summary: nil,
-                        fallbackHeadline: savedHeadline ?? "已中止"
+                        summary: event.summary ?? event.title
                     )
                 }
-            } else if event.status == "completed" || event.status == nil || event.status == "aborted" {
+            } else if event.status == "completed" || event.status == nil {
                 markHUDCompleted(
                     conversationId: conversationId,
-                    summary: event.status == "aborted" ? nil : (event.summary ?? event.title),
-                    fallbackHeadline: savedHeadline ?? (event.status == "aborted" ? "已中止" : nil)
+                    summary: event.summary ?? event.title,
+                    fallbackHeadline: savedHeadline
+                )
+            } else if event.status == "aborted" {
+                markHUDStopped(
+                    conversationId: conversationId,
+                    summary: event.summary ?? event.title
                 )
             }
             clearPending(for: conversationId)
@@ -468,10 +477,9 @@ final class StatusStore {
                     )
                 )
             } else if event.status == "aborted" {
-                markHUDCompleted(
+                markHUDStopped(
                     conversationId: conversationId,
-                    summary: nil,
-                    fallbackHeadline: savedHeadline ?? "已中止"
+                    summary: event.summary ?? event.title
                 )
             }
 
@@ -659,12 +667,23 @@ final class StatusStore {
     }
 
     private func markHUDCompleted(conversationId: String, summary: String?, fallbackHeadline: String?) {
+        hudStoppedSessions.remove(conversationId)
         if let text = normalizedRecentText(summary) {
             hudCompletedSummaries[conversationId] = text
         } else if let fallback = fallbackHeadline?.trimmingCharacters(in: .whitespacesAndNewlines), !fallback.isEmpty {
             hudCompletedSummaries[conversationId] = truncated(fallback, limit: 200)
         } else {
             hudCompletedSummaries[conversationId] = "任务已完成"
+        }
+        markHUDSession(conversationId)
+    }
+
+    private func markHUDStopped(conversationId: String, summary: String?) {
+        hudStoppedSessions.insert(conversationId)
+        if let text = normalizedRecentText(summary) {
+            hudCompletedSummaries[conversationId] = text
+        } else {
+            hudCompletedSummaries[conversationId] = "已停止"
         }
         markHUDSession(conversationId)
     }
@@ -726,6 +745,10 @@ final class StatusStore {
 
     func isFloatingHUDDismissed(for conversationId: String) -> Bool {
         hudUserDismissedSessions.contains(conversationId)
+    }
+
+    func isHUDStopped(for conversationId: String) -> Bool {
+        hudStoppedSessions.contains(conversationId)
     }
 
     func thoughtRevision(for conversationId: String) -> Int {

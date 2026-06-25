@@ -104,6 +104,13 @@ func runHUDPhaseTests() -> Int {
     content = store.floatingContent(for: singleConv)
     guard assertPhase("single-thought execute", content.statusLine == "正在读取 foo.swift") else { return 1 }
 
+    let stopConv = "hudphasestop1234"
+    store.handle(event("beforeSubmitPrompt", conversationId: stopConv, title: headline))
+    store.handle(event("afterAgentThought", conversationId: stopConv, title: thoughtText))
+    store.handle(event("stop", conversationId: stopConv, status: "aborted"))
+    content = store.floatingContent(for: stopConv)
+    guard assertPhase("stopped", content.statusLine == "已停止" && content.statusCode == .stop) else { return 1 }
+
     fputs("OK: HUD phase sequence verified\n", stderr)
     return 0
 }

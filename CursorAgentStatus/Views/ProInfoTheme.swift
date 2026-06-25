@@ -5,6 +5,7 @@ enum ProStatusCode: String {
     case run = "RUN"
     case pnd = "PND"
     case done = "DONE"
+    case stop = "STOP"
 
     init(trafficLight state: TrafficLightState) {
         switch state {
@@ -29,6 +30,7 @@ enum ProStatusCode: String {
         case .run: return Color(red: 0.20, green: 0.45, blue: 0.95)
         case .pnd: return Color(red: 0.90, green: 0.45, blue: 0.12)
         case .done: return Color(red: 0.18, green: 0.62, blue: 0.36)
+        case .stop: return Color(red: 0.82, green: 0.24, blue: 0.24)
         }
     }
 }

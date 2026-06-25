@@ -322,7 +322,7 @@ extension StatusStore {
         let thought = sessionThought(for: conversationId)
         let ongoing = isOngoingConversation(conversationId)
 
-        // 5. 完成阶段
+        // 5. 完成 / 停止阶段
         if let summary = hudCompletedSummary(for: conversationId),
            !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return AgentFloatingContent(
@@ -330,7 +330,7 @@ extension StatusStore {
                 conversationId: conversationId,
                 agentName: agentName,
                 statusLine: summary,
-                statusCode: .done,
+                statusCode: isHUDStopped(for: conversationId) ? .stop : .done,
                 canStop: false,
                 stepStartedAt: nil
             )
