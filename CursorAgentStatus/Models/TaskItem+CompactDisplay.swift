@@ -242,6 +242,38 @@ extension TaskItem {
     }
 }
 
+/// HUD 第二行：基于 afterAgentThought 文本格式化
+enum HUDThoughtFormatter {
+    /// 准备阶段：Agent 思考摘要（较短）
+    static func summary(_ text: String?) -> String? {
+        format(text, maxLength: 60)
+    }
+
+    /// 思考阶段：afterAgentThought 截断正文
+    static func truncated(_ text: String?) -> String? {
+        format(text, maxLength: 80)
+    }
+
+    private static func format(_ text: String?, maxLength: Int) -> String? {
+        guard let text else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if looksLikeShellCommand(trimmed) { return nil }
+        guard trimmed.count > maxLength else { return trimmed }
+        return String(trimmed.prefix(maxLength)) + "…"
+    }
+
+    private static func looksLikeShellCommand(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        let prefixes = [
+            "cd ", "npm ", "git ", "curl ", "bash ", "python ", "pnpm ", "yarn ",
+            "xcodebuild", "sudo ", "make ", "docker ", "kubectl ", "./"
+        ]
+        if prefixes.contains(where: { lower.hasPrefix($0) }) { return true }
+        return text.contains("&&") || text.contains(" | ") || text.hasPrefix("/bin/")
+    }
+}
+
 extension StatusStore {
     var floatingRunningTasksOrdered: [TaskItem] {
         running.sorted { $0.updatedAt > $1.updatedAt }
@@ -252,67 +284,71 @@ extension StatusStore {
         activeHUDSessionIds.map { floatingContent(for: $0) }
     }
 
-    private func isTrackableConversationId(_ id: String) -> Bool {
-        id != "unknown" && id.count >= 8
-    }
-
     func floatingContent(for conversationId: String) -> AgentFloatingContent {
         let agentName = agentDisplayName(for: conversationId)
-        let runningFor = running.filter { $0.conversationId == conversationId }
-        let pendingFor = pending.filter { $0.conversationId == conversationId }
         let headline = sessionHeadline(for: conversationId)
         let thought = sessionThought(for: conversationId)
+        let ongoing = isOngoingConversation(conversationId)
 
-        if let task = bestRunningTask(for: conversationId, in: runningFor) {
+        // 4. 完成阶段
+        if let summary = hudCompletedSummary(for: conversationId),
+           !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return AgentFloatingContent(
                 panelId: conversationId,
                 conversationId: conversationId,
                 agentName: agentName,
-                statusLine: task.floatingStatusLine(headline: headline, thought: thought),
-                statusCode: .run,
-                canStop: true,
-                stepStartedAt: task.startedAt
+                statusLine: summary,
+                statusCode: .done,
+                canStop: false,
+                stepStartedAt: nil
             )
         }
 
-        if let task = pendingFor.max(by: { $0.updatedAt < $1.updatedAt }) {
-            let line = task.kind == .response && task.title == "等待用户输入"
-                ? (headline.map { "等待确认：\($0)" } ?? task.floatingStatusLine(headline: nil, thought: thought))
-                : task.floatingStatusLine(headline: headline, thought: thought)
+        let runningFor = running.filter { $0.conversationId == conversationId }
+        let hasTools = runningFor.contains { $0.kind == .tool || $0.kind == .subagent }
+
+        // 3. 思考阶段（工具/subagent 执行中）
+        if hasTools {
+            let line = HUDThoughtFormatter.truncated(thought) ?? "思考中…"
             return AgentFloatingContent(
                 panelId: conversationId,
                 conversationId: conversationId,
                 agentName: agentName,
                 statusLine: line,
-                statusCode: .pnd,
-                canStop: false,
-                stepStartedAt: task.startedAt
-            )
-        }
-
-        if isOngoingConversation(conversationId) {
-            return AgentFloatingContent(
-                panelId: conversationId,
-                conversationId: conversationId,
-                agentName: agentName,
-                statusLine: ongoingStatusLine(headline: headline, thought: thought),
                 statusCode: .run,
-                canStop: true,
-                stepStartedAt: conversationLastActivity(conversationId)
+                canStop: ongoing,
+                stepStartedAt: runningStepStartedAt(for: runningFor, conversationId: conversationId)
             )
         }
 
-        if let recentItem = recent
-            .filter({ $0.conversationId == conversationId })
-            .max(by: { $0.updatedAt < $1.updatedAt }) {
+        // 2. 准备阶段（收到 afterAgentThought，尚未调用工具）
+        if runningFor.contains(where: { $0.kind == .thinking }) || thought != nil {
+            let thinkingTask = runningFor.first(where: { $0.kind == .thinking })
+            let line = HUDThoughtFormatter.summary(thought) ?? "准备中…"
             return AgentFloatingContent(
                 panelId: conversationId,
                 conversationId: conversationId,
                 agentName: agentName,
-                statusLine: recentItem.floatingCompletedTitle(),
-                statusCode: .done,
-                canStop: false,
-                stepStartedAt: nil
+                statusLine: line,
+                statusCode: .run,
+                canStop: ongoing,
+                stepStartedAt: thinkingTask?.startedAt ?? conversationLastActivity(conversationId)
+            )
+        }
+
+        // 1. Prompt 阶段（任务刚开始，尚无 Agent 思考）
+        if runningFor.contains(where: { $0.kind == .processing }) {
+            let prepareTask = runningFor.first(where: { $0.kind == .processing })
+            let trimmedHeadline = headline?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let line = trimmedHeadline.isEmpty ? "处理中…" : trimmedHeadline
+            return AgentFloatingContent(
+                panelId: conversationId,
+                conversationId: conversationId,
+                agentName: agentName,
+                statusLine: line,
+                statusCode: .run,
+                canStop: ongoing,
+                stepStartedAt: prepareTask?.startedAt ?? conversationLastActivity(conversationId)
             )
         }
 
@@ -320,11 +356,18 @@ extension StatusStore {
             panelId: conversationId,
             conversationId: conversationId,
             agentName: agentName,
-            statusLine: "暂无活动",
-            statusCode: .idle,
-            canStop: false,
-            stepStartedAt: nil
+            statusLine: "处理中…",
+            statusCode: .run,
+            canStop: ongoing,
+            stepStartedAt: conversationLastActivity(conversationId)
         )
+    }
+
+    private func runningStepStartedAt(for runningFor: [TaskItem], conversationId: String) -> Date? {
+        if let earliest = runningFor.map(\.startedAt).min() {
+            return earliest
+        }
+        return conversationLastActivity(conversationId)
     }
 
     func floatingIdleContent() -> AgentFloatingContent {
@@ -337,33 +380,6 @@ extension StatusStore {
             canStop: false,
             stepStartedAt: nil
         )
-    }
-
-    private func latestActivity(for conversationId: String) -> Date {
-        let items = (running + pending).filter { $0.conversationId == conversationId }
-        if let latest = items.map(\.updatedAt).max() {
-            return latest
-        }
-        return conversationLastActivity(conversationId) ?? .distantPast
-    }
-
-    private func ongoingStatusLine(headline: String?, thought: String?) -> String {
-        if let thought, !thought.isEmpty { return thought }
-        if let headline, !headline.isEmpty { return headline }
-        return "处理中…"
-    }
-
-    private func bestRunningTask(for conversationId: String, in items: [TaskItem]) -> TaskItem? {
-        let items = items.filter { $0.conversationId == conversationId }
-        guard !items.isEmpty else { return nil }
-
-        let priority: [TaskKind] = [.subagent, .thinking, .processing, .tool, .session]
-        for kind in priority {
-            if let item = items.filter({ $0.kind == kind }).max(by: { $0.updatedAt < $1.updatedAt }) {
-                return item
-            }
-        }
-        return items.max(by: { $0.updatedAt < $1.updatedAt })
     }
 
     func floatingContent(at rotateIndex: Int) -> FloatingPanelContent {

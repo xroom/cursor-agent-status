@@ -53,6 +53,36 @@ final class EventTailer {
             }
     }
 
+    /// 重放日志末尾若干行，供 App 重启后恢复当前会话 HUD 状态。
+    /// 仅包含「尾部窗口」里出现过的 conversation，避免历史测试会话堆叠悬浮窗。
+    func replayRecentEvents(maxLines: Int = 120, conversationTailLines: Int = 50) -> [AgentEvent] {
+        guard FileManager.default.fileExists(atPath: Self.eventsFile.path),
+              let data = try? Data(contentsOf: Self.eventsFile),
+              let content = String(data: data, encoding: .utf8) else {
+            return []
+        }
+
+        let events = content
+            .split(whereSeparator: \.isNewline)
+            .suffix(maxLines)
+            .compactMap { line -> AgentEvent? in
+                guard !line.isEmpty else { return nil }
+                return decodeEvent(from: Data(line.utf8))
+            }
+
+        let tail = Array(events.suffix(conversationTailLines))
+        let allowedIds = Set(tail.compactMap { event -> String? in
+            guard let id = event.conversationId, id != "unknown", id.count >= 8 else { return nil }
+            return id
+        })
+
+        guard !allowedIds.isEmpty else { return [] }
+        return events.filter { event in
+            guard let id = event.conversationId else { return false }
+            return allowedIds.contains(id)
+        }
+    }
+
     private func ensureStatusDirectory() {
         try? FileManager.default.createDirectory(at: Self.statusDirectory, withIntermediateDirectories: true)
     }

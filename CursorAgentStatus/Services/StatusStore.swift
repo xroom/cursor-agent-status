@@ -39,8 +39,12 @@ final class StatusStore {
     private var conversationThoughts: [String: String] = [:]
     /// 尚未 sessionEnd 的会话（stop 仅表示单轮结束，不代表会话关闭）
     private var ongoingConversations: Set<String> = []
-    /// 本次 App 启动后应展示 HUD 的会话（由 Agent 开始事件标记，stop/sessionEnd 清除）
+    /// 本次 App 启动后应展示 HUD 的会话（由 Agent 开始事件标记，完成后保持直至新任务）
     private var hudSessions: Set<String> = []
+    /// HUD 完成态 summary，不受 recentTTL 影响，直至同会话 beforeSubmitPrompt 清除
+    private var hudCompletedSummaries: [String: String] = [:]
+    /// 最近一次 Agent 回复正文，stop 无 summary 时用于 HUD 完成态
+    private var lastAgentResponseSummaries: [String: String] = [:]
     private var pruneTimer: Timer?
 
     var activeCount: Int {
@@ -66,14 +70,47 @@ final class StatusStore {
         startPruneTimer()
     }
 
-    /// 启动后只消费新事件，不恢复历史任务状态与悬浮窗。
+    /// 启动时清空内存态；随后由 AppLaunchCoordinator 重放近期 events.jsonl 再 tail 新事件。
     func prepareForLiveEvents() {
         resetActiveState()
     }
 
     func handle(_ event: AgentEvent) {
         apply(event)
-        refreshPublishedLists()
+        refreshPublishedLists(notifyHUD: true)
+    }
+
+    /// 批量重放启动前日志，避免每条事件都触发 HUD 刷新。
+    func replayEvents(_ events: [AgentEvent]) {
+        for event in events {
+            apply(event)
+        }
+        refreshPublishedLists(notifyHUD: false)
+    }
+
+    /// 启动重放后收敛 HUD：保留进行中的会话，完成态只保留最近一个。
+    func finalizeHUDSessionsAfterReplay() {
+        let activelyWorking = Set(running.compactMap(\.conversationId)).union(ongoingConversations)
+
+        let completedOnly = hudSessions.filter {
+            hudCompletedSummaries[$0] != nil && !activelyWorking.contains($0)
+        }
+        let keepCompleted = completedOnly.max {
+            (lastActivityAt[$0] ?? .distantPast) < (lastActivityAt[$1] ?? .distantPast)
+        }
+
+        hudSessions = hudSessions.filter { id in
+            activelyWorking.contains(id) || id == keepCompleted
+        }
+
+        hudCompletedSummaries = hudCompletedSummaries.filter { hudSessions.contains($0.key) }
+        lastAgentResponseSummaries = lastAgentResponseSummaries.filter { hudSessions.contains($0.key) }
+        conversationHeadlines = conversationHeadlines.filter { hudSessions.contains($0.key) }
+        conversationThoughts = conversationThoughts.filter { hudSessions.contains($0.key) }
+        agentNames = agentNames.filter { hudSessions.contains($0.key) }
+        lastActivityAt = lastActivityAt.filter { hudSessions.contains($0.key) }
+
+        refreshPublishedLists(notifyHUD: true)
     }
 
     /// 手动清除所有进行中和待确认状态（用于 Cursor 重启后残留）
@@ -89,6 +126,8 @@ final class StatusStore {
         conversationThoughts.removeAll()
         ongoingConversations.removeAll()
         hudSessions.removeAll()
+        hudCompletedSummaries.removeAll()
+        lastAgentResponseSummaries.removeAll()
         refreshPublishedLists()
     }
 
@@ -118,11 +157,7 @@ final class StatusStore {
         hudSessions.insert(conversationId)
     }
 
-    private func clearHUDSession(_ conversationId: String) {
-        hudSessions.remove(conversationId)
-    }
-
-    private func isAgentStartEvent(_ name: String) -> Bool {
+    private func isHUDVisibleEvent(_ name: String) -> Bool {
         switch name {
         case "beforeSubmitPrompt", "sessionStart", "preToolUse", "subagentStart", "afterAgentThought":
             return true
@@ -138,12 +173,13 @@ final class StatusStore {
         let now = event.date
         lastActivityAt[conversationId] = now
 
-        if isAgentStartEvent(event.event) {
+        if isHUDVisibleEvent(event.event) {
             markHUDSession(conversationId)
         }
 
         switch event.event {
         case "beforeSubmitPrompt":
+            hudCompletedSummaries.removeValue(forKey: conversationId)
             ongoingConversations.insert(conversationId)
             let promptPreview = event.title ?? "正在处理指令"
             conversationHeadlines[conversationId] = truncated(promptPreview, limit: 80)
@@ -207,19 +243,36 @@ final class StatusStore {
             lastResponseAt.removeValue(forKey: conversationId)
 
         case "sessionEnd":
-            clearHUDSession(conversationId)
+            let savedHeadline = conversationHeadlines[conversationId]
             ongoingConversations.remove(conversationId)
             conversationHeadlines.removeValue(forKey: conversationId)
             agentNames.removeValue(forKey: conversationId)
             conversationThoughts.removeValue(forKey: conversationId)
             if let session = sessions.removeValue(forKey: conversationId) {
                 if event.status == "completed" || event.status == nil {
+                    markHUDCompleted(
+                        conversationId: conversationId,
+                        summary: event.summary ?? event.title,
+                        fallbackHeadline: savedHeadline
+                    )
                     addRecent(
                         from: session,
                         summary: event.summary ?? event.title,
                         at: now
                     )
+                } else if event.status == "aborted" {
+                    markHUDCompleted(
+                        conversationId: conversationId,
+                        summary: nil,
+                        fallbackHeadline: savedHeadline ?? "已中止"
+                    )
                 }
+            } else if event.status == "completed" || event.status == nil || event.status == "aborted" {
+                markHUDCompleted(
+                    conversationId: conversationId,
+                    summary: event.status == "aborted" ? nil : (event.summary ?? event.title),
+                    fallbackHeadline: savedHeadline ?? (event.status == "aborted" ? "已中止" : nil)
+                )
             }
             clearPending(for: conversationId)
             lastResponseAt.removeValue(forKey: conversationId)
@@ -334,6 +387,7 @@ final class StatusStore {
             clearRunningTools(for: conversationId)
             clearRunningSubagents(for: conversationId)
             if let summary = normalizedRecentText(event.summary ?? event.title) {
+                lastAgentResponseSummaries[conversationId] = summary
                 addRecent(
                     TaskItem(
                         id: "response-\(conversationId)-\(Int(now.timeIntervalSince1970))",
@@ -353,7 +407,7 @@ final class StatusStore {
             }
 
         case "stop":
-            clearHUDSession(conversationId)
+            let savedHeadline = conversationHeadlines[conversationId]
             clearRunningTools(for: conversationId)
             clearRunningSubagents(for: conversationId)
             clearPending(for: conversationId)
@@ -365,6 +419,11 @@ final class StatusStore {
                 conversationThoughts.removeValue(forKey: conversationId)
             }
             if event.status == "completed" {
+                markHUDCompleted(
+                    conversationId: conversationId,
+                    summary: event.summary ?? event.title ?? lastAgentResponseSummaries[conversationId],
+                    fallbackHeadline: savedHeadline
+                )
                 addRecent(
                     TaskItem(
                         id: "stop-\(conversationId)-\(Int(now.timeIntervalSince1970))",
@@ -381,6 +440,12 @@ final class StatusStore {
                         summary: event.summary ?? event.title
                     )
                 )
+            } else if event.status == "aborted" {
+                markHUDCompleted(
+                    conversationId: conversationId,
+                    summary: nil,
+                    fallbackHeadline: savedHeadline ?? "已中止"
+                )
             }
 
         default:
@@ -388,7 +453,7 @@ final class StatusStore {
         }
     }
 
-    private func refreshPublishedLists() {
+    private func refreshPublishedLists(notifyHUD: Bool = false) {
         pruneExpired()
         pruneStaleRunning(now: Date())
         promoteAwaitingInput()
@@ -405,7 +470,7 @@ final class StatusStore {
         pending = newPending
         recent = newRecent
 
-        if changed {
+        if changed || notifyHUD {
             revision += 1
             onStateChange?()
         }
@@ -560,9 +625,21 @@ final class StatusStore {
             return now.timeIntervalSince(last) < staleSessionTTL
         }
         hudSessions = hudSessions.filter { conversationId in
+            if hudCompletedSummaries[conversationId] != nil { return true }
             guard let last = lastActivityAt[conversationId] else { return false }
             return now.timeIntervalSince(last) < staleSessionTTL
         }
+    }
+
+    private func markHUDCompleted(conversationId: String, summary: String?, fallbackHeadline: String?) {
+        if let text = normalizedRecentText(summary) {
+            hudCompletedSummaries[conversationId] = text
+        } else if let fallback = fallbackHeadline?.trimmingCharacters(in: .whitespacesAndNewlines), !fallback.isEmpty {
+            hudCompletedSummaries[conversationId] = truncated(fallback, limit: 200)
+        } else {
+            hudCompletedSummaries[conversationId] = "任务已完成"
+        }
+        markHUDSession(conversationId)
     }
 
     private func clearRunningTools(for conversationId: String) {
@@ -608,6 +685,10 @@ final class StatusStore {
     func sessionHeadline(for conversationId: String?) -> String? {
         guard let conversationId else { return nil }
         return conversationHeadlines[conversationId]
+    }
+
+    func hudCompletedSummary(for conversationId: String) -> String? {
+        hudCompletedSummaries[conversationId]
     }
 
     func sessionThought(for conversationId: String?) -> String? {

@@ -21,6 +21,9 @@ enum AppLaunchCoordinator {
             refreshFloatingPanels(store: store, panelController: panelController)
         }
 
+        store.replayEvents(tailer.replayRecentEvents())
+        store.finalizeHUDSessionsAfterReplay()
+
         tailer.onEvent = { event in
             Task { @MainActor in
                 store.handle(event)
@@ -28,6 +31,7 @@ enum AppLaunchCoordinator {
         }
 
         tailer.start()
+        refreshFloatingPanels(store: store, panelController: panelController)
     }
 
     static func refreshFloatingPanels(
