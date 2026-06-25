@@ -3,6 +3,10 @@ import SwiftUI
 struct FloatingPanelView: View {
     @Bindable var store: StatusStore
     let conversationId: String?
+    var stackCount: Int = 1
+    var isStackCollapsed: Bool = false
+    var showsStackBadge: Bool = false
+    var onExpandStack: (() -> Void)? = nil
 
     @State private var tick = Date()
 
@@ -52,11 +56,21 @@ struct FloatingPanelView: View {
             .padding(.vertical, 8)
             .padding(.top, conversationId == nil ? 0 : 4)
             .padding(.trailing, conversationId == nil ? 0 : 12)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if isStackCollapsed {
+                    onExpandStack?()
+                }
+            }
 
             if let conversationId {
                 closeButton(conversationId: conversationId)
                     .padding(.top, 2)
                     .padding(.trailing, 2)
+            }
+
+            if showsStackBadge {
+                stackCountBadge
             }
         }
         .frame(maxWidth: FloatingPanelLayout.maxWidth, alignment: .leading)
@@ -82,6 +96,21 @@ struct FloatingPanelView: View {
         }
         .buttonStyle(.plain)
         .help("关闭悬浮窗")
+    }
+
+    private var stackCountBadge: some View {
+        Text("\(stackCount)")
+            .font(.system(size: 10, weight: .bold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(Color.accentColor))
+            .padding(.leading, 8)
+            .padding(.bottom, 6)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            .onTapGesture {
+                onExpandStack?()
+            }
     }
 }
 
