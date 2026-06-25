@@ -64,6 +64,24 @@ extension TaskItem {
         }
     }
 
+    /// HUD 执行阶段：描述当前工具/subagent 动作
+    var hudExecutionLine: String {
+        switch kind {
+        case .subagent:
+            let detail = sanitizedFloatingTitle(title, fallback: "", maxLength: 60)
+            if (subtitle ?? "").lowercased() == "explore" {
+                return detail.isEmpty ? "正在探索代码库" : "正在探索 · \(detail)"
+            }
+            return detail.isEmpty ? "正在运行 Subagent" : "正在运行 · \(detail)"
+        case .tool where subtitle == "Shell":
+            return "正在执行命令"
+        case .tool:
+            return compactToolAction(prefix: "正在")
+        default:
+            return "执行中…"
+        }
+    }
+
     private func compactToolAction(prefix: String) -> String {
         let tool = subtitle ?? ""
         switch tool {
@@ -242,6 +260,12 @@ extension TaskItem {
     }
 }
 
+/// HUD 准备/思考子阶段
+enum HUDThoughtPhase {
+    case prepare
+    case thinking
+}
+
 /// HUD 第二行：基于 afterAgentThought 文本格式化
 enum HUDThoughtFormatter {
     /// 准备阶段：Agent 思考摘要（较短）
@@ -290,7 +314,7 @@ extension StatusStore {
         let thought = sessionThought(for: conversationId)
         let ongoing = isOngoingConversation(conversationId)
 
-        // 4. 完成阶段
+        // 5. 完成阶段
         if let summary = hudCompletedSummary(for: conversationId),
            !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return AgentFloatingContent(
@@ -307,8 +331,23 @@ extension StatusStore {
         let runningFor = running.filter { $0.conversationId == conversationId }
         let hasTools = runningFor.contains { $0.kind == .tool || $0.kind == .subagent }
 
-        // 3. 思考阶段（工具/subagent 执行中）
-        if hasTools {
+        // 4. 执行阶段（工具/subagent 执行中）
+        if hasTools, let task = bestExecutionTask(in: runningFor) {
+            return AgentFloatingContent(
+                panelId: conversationId,
+                conversationId: conversationId,
+                agentName: agentName,
+                statusLine: task.hudExecutionLine,
+                statusCode: .run,
+                canStop: ongoing,
+                stepStartedAt: runningStepStartedAt(for: runningFor, conversationId: conversationId)
+            )
+        }
+
+        // 3. 思考阶段（准备结束后，或第二次及以后 afterAgentThought）
+        if (runningFor.contains(where: { $0.kind == .thinking }) || thought != nil),
+           isHUDThinkingPhase(conversationId) {
+            let thinkingTask = runningFor.first(where: { $0.kind == .thinking })
             let line = HUDThoughtFormatter.truncated(thought) ?? "思考中…"
             return AgentFloatingContent(
                 panelId: conversationId,
@@ -317,12 +356,13 @@ extension StatusStore {
                 statusLine: line,
                 statusCode: .run,
                 canStop: ongoing,
-                stepStartedAt: runningStepStartedAt(for: runningFor, conversationId: conversationId)
+                stepStartedAt: thinkingTask?.startedAt ?? conversationLastActivity(conversationId)
             )
         }
 
-        // 2. 准备阶段（收到 afterAgentThought，尚未调用工具）
-        if runningFor.contains(where: { $0.kind == .thinking }) || thought != nil {
+        // 2. 准备阶段（首次 afterAgentThought）
+        if (runningFor.contains(where: { $0.kind == .thinking }) || thought != nil),
+           isHUDPreparePhase(conversationId) {
             let thinkingTask = runningFor.first(where: { $0.kind == .thinking })
             let line = HUDThoughtFormatter.summary(thought) ?? "准备中…"
             return AgentFloatingContent(
@@ -368,6 +408,19 @@ extension StatusStore {
             return earliest
         }
         return conversationLastActivity(conversationId)
+    }
+
+    private func bestExecutionTask(in runningFor: [TaskItem]) -> TaskItem? {
+        let executors = runningFor.filter { $0.kind == .tool || $0.kind == .subagent }
+        guard !executors.isEmpty else { return nil }
+
+        let priority: [TaskKind] = [.subagent, .tool]
+        for kind in priority {
+            if let item = executors.filter({ $0.kind == kind }).max(by: { $0.updatedAt < $1.updatedAt }) {
+                return item
+            }
+        }
+        return executors.max(by: { $0.updatedAt < $1.updatedAt })
     }
 
     func floatingIdleContent() -> AgentFloatingContent {

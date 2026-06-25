@@ -10,6 +10,7 @@ func runHUDPhaseTests() -> Int {
 
     func event(
         _ name: String,
+        conversationId: String = conv,
         title: String? = nil,
         summary: String? = nil,
         toolUseId: String? = nil,
@@ -19,7 +20,7 @@ func runHUDPhaseTests() -> Int {
         AgentEvent(
             ts: Int64(Date().timeIntervalSince1970 * 1000),
             event: name,
-            conversationId: conv,
+            conversationId: conversationId,
             generationId: nil,
             toolUseId: toolUseId,
             toolName: toolName,
@@ -46,7 +47,6 @@ func runHUDPhaseTests() -> Int {
 
     let thoughtText = "正在分析代码结构，准备检查 EventTailer 与 StatusStore 的事件处理逻辑"
     let thoughtSummary = HUDThoughtFormatter.summary(thoughtText)!
-    let thoughtTruncated = HUDThoughtFormatter.truncated(thoughtText)!
 
     store.handle(event("beforeSubmitPrompt", title: headline))
     var content = store.floatingContent(for: conv)
@@ -56,9 +56,14 @@ func runHUDPhaseTests() -> Int {
     content = store.floatingContent(for: conv)
     guard assertPhase("prepare", content.statusLine == thoughtSummary && content.statusCode == .run) else { return 1 }
 
-    store.handle(event("preToolUse", title: "Read foo.swift", toolUseId: "tool-1", toolName: "Read"))
+    store.handle(event("afterAgentThought", title: thoughtText + "，继续深入分析"))
     content = store.floatingContent(for: conv)
-    guard assertPhase("thinking", content.statusLine == thoughtTruncated && content.statusCode == .run) else { return 1 }
+    let secondThought = thoughtText + "，继续深入分析"
+    guard assertPhase("thinking", content.statusLine == HUDThoughtFormatter.truncated(secondThought)! && content.statusCode == .run) else { return 1 }
+
+    store.handle(event("preToolUse", title: "/tmp/foo.swift", toolUseId: "tool-1", toolName: "Read"))
+    content = store.floatingContent(for: conv)
+    guard assertPhase("execute", content.statusLine == "正在读取 foo.swift" && content.statusCode == .run) else { return 1 }
 
     store.handle(event("stop", summary: summary, status: "completed"))
     content = store.floatingContent(for: conv)
@@ -81,6 +86,23 @@ func runHUDPhaseTests() -> Int {
     store.handle(event("afterAgentThought", title: newThought))
     content = store.floatingContent(for: conv)
     guard assertPhase("new task prepare", content.statusLine == HUDThoughtFormatter.summary(newThought)!) else { return 1 }
+
+    let singleConv = "singlethought12345"
+    store.handle(event("beforeSubmitPrompt", conversationId: singleConv, title: headline))
+    content = store.floatingContent(for: singleConv)
+    guard assertPhase("single-thought prompt", content.statusLine == headline) else { return 1 }
+
+    store.handle(event("afterAgentThought", conversationId: singleConv, title: thoughtText))
+    content = store.floatingContent(for: singleConv)
+    guard assertPhase("single-thought prepare", content.statusLine == thoughtSummary) else { return 1 }
+
+    store.advanceHUDThoughtPhase(for: singleConv)
+    content = store.floatingContent(for: singleConv)
+    guard assertPhase("single-thought thinking", content.statusLine == HUDThoughtFormatter.truncated(thoughtText)!) else { return 1 }
+
+    store.handle(event("preToolUse", conversationId: singleConv, title: "/tmp/foo.swift", toolUseId: "tool-single", toolName: "Read"))
+    content = store.floatingContent(for: singleConv)
+    guard assertPhase("single-thought execute", content.statusLine == "正在读取 foo.swift") else { return 1 }
 
     fputs("OK: HUD phase sequence verified\n", stderr)
     return 0

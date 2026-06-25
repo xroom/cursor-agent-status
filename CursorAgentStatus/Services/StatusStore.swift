@@ -37,6 +37,12 @@ final class StatusStore {
     private var agentNames: [String: String] = [:]
     /// 最近一次 Agent 思考摘要（afterAgentThought）
     private var conversationThoughts: [String: String] = [:]
+    /// 每个会话收到的 afterAgentThought 次数（用于区分准备/思考阶段）
+    private var conversationThoughtRevisions: [String: Int] = [:]
+    /// HUD 准备/思考子阶段（单次 thought 时由定时器从准备推进到思考）
+    private var hudThoughtPhase: [String: HUDThoughtPhase] = [:]
+    private var hudThoughtPhaseTasks: [String: Task<Void, Never>] = [:]
+    private static let hudPrepareDisplayDuration: UInt64 = 500_000_000
     /// 尚未 sessionEnd 的会话（stop 仅表示单轮结束，不代表会话关闭）
     private var ongoingConversations: Set<String> = []
     /// 本次 App 启动后应展示 HUD 的会话（由 Agent 开始事件标记，完成后保持直至新任务）
@@ -107,6 +113,8 @@ final class StatusStore {
         lastAgentResponseSummaries = lastAgentResponseSummaries.filter { hudSessions.contains($0.key) }
         conversationHeadlines = conversationHeadlines.filter { hudSessions.contains($0.key) }
         conversationThoughts = conversationThoughts.filter { hudSessions.contains($0.key) }
+        conversationThoughtRevisions = conversationThoughtRevisions.filter { hudSessions.contains($0.key) }
+        hudThoughtPhase = hudThoughtPhase.filter { hudSessions.contains($0.key) }
         agentNames = agentNames.filter { hudSessions.contains($0.key) }
         lastActivityAt = lastActivityAt.filter { hudSessions.contains($0.key) }
 
@@ -124,6 +132,9 @@ final class StatusStore {
         conversationHeadlines.removeAll()
         agentNames.removeAll()
         conversationThoughts.removeAll()
+        conversationThoughtRevisions.removeAll()
+        cancelAllHUDThoughtPhaseAdvances()
+        hudThoughtPhase.removeAll()
         ongoingConversations.removeAll()
         hudSessions.removeAll()
         hudCompletedSummaries.removeAll()
@@ -180,6 +191,9 @@ final class StatusStore {
         switch event.event {
         case "beforeSubmitPrompt":
             hudCompletedSummaries.removeValue(forKey: conversationId)
+            conversationThoughtRevisions.removeValue(forKey: conversationId)
+            cancelHUDThoughtPhaseAdvance(for: conversationId)
+            hudThoughtPhase.removeValue(forKey: conversationId)
             ongoingConversations.insert(conversationId)
             let promptPreview = event.title ?? "正在处理指令"
             conversationHeadlines[conversationId] = truncated(promptPreview, limit: 80)
@@ -205,6 +219,15 @@ final class StatusStore {
 
         case "afterAgentThought":
             ongoingConversations.insert(conversationId)
+            conversationThoughtRevisions[conversationId, default: 0] += 1
+            let thoughtRevision = conversationThoughtRevisions[conversationId] ?? 1
+            if thoughtRevision == 1 {
+                hudThoughtPhase[conversationId] = .prepare
+                scheduleHUDThoughtPhaseAdvance(for: conversationId)
+            } else {
+                cancelHUDThoughtPhaseAdvance(for: conversationId)
+                hudThoughtPhase[conversationId] = .thinking
+            }
             if let thought = normalizedThoughtText(event.title) {
                 conversationThoughts[conversationId] = thought
             }
@@ -689,6 +712,50 @@ final class StatusStore {
 
     func hudCompletedSummary(for conversationId: String) -> String? {
         hudCompletedSummaries[conversationId]
+    }
+
+    func thoughtRevision(for conversationId: String) -> Int {
+        conversationThoughtRevisions[conversationId] ?? 0
+    }
+
+    func isHUDPreparePhase(_ conversationId: String) -> Bool {
+        hudThoughtPhase[conversationId] == .prepare
+    }
+
+    func isHUDThinkingPhase(_ conversationId: String) -> Bool {
+        if thoughtRevision(for: conversationId) >= 2 { return true }
+        return hudThoughtPhase[conversationId] == .thinking
+    }
+
+    /// 将 HUD 从准备阶段推进到思考阶段（定时器或测试调用）
+    func advanceHUDThoughtPhase(for conversationId: String) {
+        cancelHUDThoughtPhaseAdvance(for: conversationId)
+        guard thoughtRevision(for: conversationId) == 1 else { return }
+        let thought = conversationThoughts[conversationId]
+        let summary = HUDThoughtFormatter.summary(thought)
+        let truncated = HUDThoughtFormatter.truncated(thought)
+        hudThoughtPhase[conversationId] = .thinking
+        guard summary != truncated else { return }
+        refreshPublishedLists(notifyHUD: true)
+    }
+
+    private func scheduleHUDThoughtPhaseAdvance(for conversationId: String) {
+        cancelHUDThoughtPhaseAdvance(for: conversationId)
+        hudThoughtPhaseTasks[conversationId] = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: Self.hudPrepareDisplayDuration)
+            guard !Task.isCancelled else { return }
+            advanceHUDThoughtPhase(for: conversationId)
+        }
+    }
+
+    private func cancelHUDThoughtPhaseAdvance(for conversationId: String) {
+        hudThoughtPhaseTasks.removeValue(forKey: conversationId)?.cancel()
+    }
+
+    private func cancelAllHUDThoughtPhaseAdvances() {
+        for conversationId in hudThoughtPhaseTasks.keys {
+            cancelHUDThoughtPhaseAdvance(for: conversationId)
+        }
     }
 
     func sessionThought(for conversationId: String?) -> String? {
