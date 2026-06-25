@@ -46,7 +46,10 @@ final class FloatingPanelController: NSObject {
     private let snapGap: CGFloat = 8
     /// 拖拽时触发磁吸的距离阈值
     private let snapThreshold: CGFloat = 28
+    /// 面板尚未完成 SwiftUI 布局时的兜底尺寸
+    private let defaultPanelSize = NSSize(width: 300, height: 52)
 
+    var isActive: Bool { isEnabled }
     var isVisible: Bool { panels.values.contains { $0.panel.isVisible } }
 
     func show(store: StatusStore) {
@@ -141,6 +144,7 @@ final class FloatingPanelController: NSObject {
             } else {
                 layoutDockedPanels(orderedIds: orderedIds, centerOnScreen: true, display: true)
             }
+            scheduleDeferredRelayout()
         }
     }
 
@@ -200,8 +204,20 @@ final class FloatingPanelController: NSObject {
     private func remeasurePanel(_ entry: AgentPanelWindow) -> Bool {
         guard entry.panel.contentView != nil else { return false }
 
-        let fitted = entry.hostingView.fittingSize
-        let clampedWidth = min(max(fitted.width, 1), FloatingPanelLayout.maxWidth)
+        // 仅在窗口已展示后测量，避免 App 初始化阶段触发 AttributeGraph 崩溃
+        if entry.panel.isVisible {
+            entry.hostingView.layoutSubtreeIfNeeded()
+        }
+
+        var fitted = entry.hostingView.fittingSize
+        if !fitted.width.isFinite || fitted.width <= 1 || fitted.width == NSView.noIntrinsicMetric {
+            fitted.width = defaultPanelSize.width
+        }
+        if !fitted.height.isFinite || fitted.height <= 1 || fitted.height == NSView.noIntrinsicMetric {
+            fitted.height = defaultPanelSize.height
+        }
+
+        let clampedWidth = min(max(fitted.width, 200), FloatingPanelLayout.maxWidth)
         let newSize = NSSize(width: clampedWidth, height: max(fitted.height, 48))
 
         let changed =
@@ -341,5 +357,26 @@ final class FloatingPanelController: NSObject {
             baselineY: groupBaselineY,
             display: true
         )
+    }
+
+    /// SwiftUI 首帧渲染完成后再测量一次，修正启动时 fittingSize 过小的问题
+    private func scheduleDeferredRelayout() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isEnabled, !self.lastOrderedIds.isEmpty else { return }
+            var changed = false
+            for id in self.lastOrderedIds {
+                guard let entry = self.panels[id] else { continue }
+                if self.remeasurePanel(entry) {
+                    changed = true
+                }
+            }
+            guard changed else { return }
+            self.layoutDockedPanels(
+                orderedIds: self.lastOrderedIds,
+                anchorLeft: self.groupAnchorLeft,
+                baselineY: self.groupBaselineY,
+                display: true
+            )
+        }
     }
 }

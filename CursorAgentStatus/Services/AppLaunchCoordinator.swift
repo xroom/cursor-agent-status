@@ -37,12 +37,12 @@ enum AppLaunchCoordinator {
         panelController: FloatingPanelController
     ) {
         let showFloatingPanel = UserDefaults.standard.object(forKey: "showFloatingPanel") as? Bool ?? true
-        if showFloatingPanel {
-            if panelController.isVisible {
-                panelController.refreshLayout(store: store)
-            } else {
-                panelController.show(store: store)
-            }
+        guard showFloatingPanel else { return }
+
+        if panelController.isActive {
+            panelController.refreshLayout(store: store)
+        } else {
+            panelController.show(store: store)
         }
     }
 
